@@ -1,6 +1,10 @@
 use std::collections::{HashSet, HashMap};
 use std::hash::{Hash, Hasher};
 
+use rand::{thread_rng, Rng};
+
+use howlong::*;
+
 /// A State for the travelling salesman problem (TSP), containing a `path` (partial or complete tour)
 /// of an undirected (and, ideally, complete) graph represented by a square adjacency matrix of `u32`s
 ///
@@ -41,7 +45,7 @@ impl Hash for State {
 impl State {
     /// Construct a new State with the given path and its computed cost based on the edges in the
     /// given adjacency matrix
-    fn new(path: Vec<u32>, adj_matrix: &Vec<Vec<u32>>) -> Result<Self, &str> {
+    fn new(path: Vec<u32>, adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<Self, &str> {
         // all states must have at least one node in their path
         if path.is_empty() {
             return Err("States can't have an empty path!");
@@ -115,18 +119,69 @@ impl State {
     }
 }
 
-/// returns the best path found, its cost, and the number of expansions it made as a tuple,
-/// `(path, total_cost, expansions)`
-pub fn hill_climbing(adj_matrix: Vec<Vec<u32>>) -> (Vec<u32>, u32, u32) {
+/// prints the best path found, its cost, and the number of expansions it made
+///
+/// # Arguments
+///
+/// * `adj_matrix` - Adjacency matrix of graph
+/// * `start` - Starting node
+pub fn hill_climbing(adj_matrix: &Vec<Vec<u32>>, start: u32) -> String {
     unimplemented!();
 }
 
-pub fn simulated_annealing(adj_matrix: Vec<Vec<u32>>) -> (Vec<u32>, u32, u32) {
+pub fn simulated_annealing(adj_matrix: &Vec<Vec<u32>>) -> String {
     unimplemented!();
 }
 
-pub fn genetic(adj_matrix: Vec<Vec<u32>>) -> (Vec<u32>, u32, u32) {
+pub fn genetic(adj_matrix: &Vec<Vec<u32>>) -> String {
     unimplemented!();
+}
+
+/// Runs and times the given algorithm (in both CPU and wall clock time, in seconds) with the
+/// given adjacency matrix and (optional) starting node
+///
+/// # Arguments
+///
+/// * `algo` - Algorithm to run
+/// * `adj_matrix` - Adjacency matrix of graph
+/// * `start` - Starting node (randomized if `None`)
+pub fn time_algo(
+    algo: fn(Vec<Vec<u32>>) -> (Vec<u32>, u32, u32),
+    adj_matrix: &Vec<Vec<u32>>,
+    start: Option<u32>
+) -> String {
+    let mut start_actual = 0;
+
+    if let Some(s) = start {
+        start_actual = s;
+    }
+    else { // start from random node if no starting node given
+        start_actual = thread_rng().gen_range(0, adj_matrix.len()) as u32;
+    }
+
+    // start timers
+    let wall_clock = howlong::HighResolutionClock::now();
+    let cpu_clock = howlong::ProcessCPUClock::now();
+
+    // run algo!
+    let algo_results = algo(adj_matrix, start.unwrap());
+
+    // end timers
+    let total_wall_time = (howlong::HighResolutionClock::now() - wall_clock).as_secs();
+    let elapsed_cpu_time = howlong::ProcessCPUClock::now() - cpu_clock;
+    // colloquially, "cpu time" = user + system time:
+    let total_cpu_time = elapsed_cpu_time.user.as_secs() + elapsed_cpu_time.system.as_secs();
+
+    // output results
+    let output = "";
+
+    write!(
+        output,
+        "{}\nwall time (seconds): {}\ncpu time (seconds):{}",
+        algo_results, total_wall_time, total_cpu_time
+    ).unwrap();
+
+    return output;
 }
 
 #[cfg(test)]
