@@ -16,7 +16,4 @@ fn main() {
     //   2─────3
     //     12
     // shortest tour from 0: 0 -> 1 -> 2 -> 3 -> 0 (total cost: 97)
-
-    println!("{:?}", graph);
-    
 }

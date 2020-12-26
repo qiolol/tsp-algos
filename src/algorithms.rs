@@ -1,7 +1,8 @@
 use std::collections::{HashSet, HashMap};
 use std::hash::{Hash, Hasher};
+use std::fmt::Write as FmtWrite;
 
-use rand::{thread_rng, Rng};
+use rand::{thread_rng, Rng, seq::SliceRandom};
 
 use howlong::*;
 
@@ -11,14 +12,12 @@ use howlong::*;
 /// The first element of the `path` is the start node, and the last is the current node (or, in the
 /// case of a goal State, the final node in a complete tour).
 ///
-/// A goal State for the TSP is one containing a *non*-Hamiltonian cycle, a path from the start node
-/// that visits every other node at least once and ends at the start node (a closed walk over all nodes).
+/// A goal State for the TSP is one containing a Hamiltonian cycle, a path from the start node that
+/// visits every other node exactly once and ends at the start node.
 /// E.g., for a graph with four nodes `0`, `1`, `2`, `3`, a possible goal State would be
 /// `0 -> 1 -> 2 -> 3 -> 0`.
-///
-/// Usually, a Hamiltonian cycle is used for the goal state instead (one where every node except for
-/// the starting node is visited exactly once), but not all graphs can have Hamiltonian cycles, which
-/// I think is *lame*. I want to be able to use this on a real world, organic map! D:
+/// Note that non-complete graphs may not have any Hamiltonian cycle, hence the need for complete
+/// graphs.
 ///
 /// The `cost` of a State is the sum of the edges between its nodes. E.g., for a State containing the
 /// `path` `0 -> 2 -> 1`, the `cost` would be `adj_matrix[0][2] + adj_matrix[2][1]`.
@@ -59,8 +58,21 @@ impl State {
                 return Err("Invalid node, out of matrix's bounds!");
             }
             if let Some(last_node) = new_state.path.last() { // if path isn't empty,
-                // update cost
-                new_state.cost += adj_matrix[*last_node as usize][*n as usize];
+                // check for invalid cycle
+                if (!new_state.path.contains(n)) ||
+                    (
+                        // only the first element is permitted to repeat...
+                        (n == new_state.path.first().unwrap()) &&
+                        // ...provided we're seeing it as the FINAL element left to add
+                        (i == path.len() - 1)
+                    )
+                {
+                    // update cost
+                    new_state.cost += adj_matrix[*last_node as usize][*n as usize];
+                }
+                else {
+                    return Err("Node already in State path and not a valid Hamiltonian cycle!");
+                }
             }
             new_state.path.push(*n);
         }
@@ -78,8 +90,8 @@ impl State {
         self.cost
     }
 
-    /// Returns whether this State is a goal State (a non-Hamiltonian cycle covering all nodes in
-    /// the given adjacency matrix)
+    /// Returns whether this State is a goal State (a Hamiltonian cycle over the given adjacency
+    /// matrix)
     fn is_goal(&self, adj_matrix: &Vec<Vec<u32>>) -> bool {
         // all nodes (as indices of adj_matrix) must be in the path
         for i in 0..adj_matrix.len() {
@@ -92,6 +104,10 @@ impl State {
     }
 
     /// Return the set of States containing the neighbors of this State's last ("current") node
+    /// that are not already in the path (with the exception of the path's first node)
+    ///
+    /// The sole exception of the first node is so that the the only cyclical paths returned are
+    /// Hamiltonian cycles -- i.e., goal States -- which are the only valid cyclical States).
     fn successors(&self, adj_matrix: &Vec<Vec<u32>>) -> Vec<State> {
         let mut successors: Vec<State> = vec![];
 
@@ -106,12 +122,22 @@ impl State {
         for neighbor_index in (0..adj_matrix.len()).filter(|&x| x != *current_node as usize) {
             // only non-zero entries represent an edge (and thus a neighbor)
             if adj_matrix[*current_node as usize][neighbor_index] > 0 {
-                // the successor state will be the current State's path + a valid neighbor
-                let mut succ_path = self.path();
-                succ_path.push(neighbor_index as u32);
+                if (!self.path.contains(&(neighbor_index as u32))) || // only permit acyclic paths...
+                    (neighbor_index == (*first_node) as usize) // ...except for apparent Hamiltonian paths
+                {
+                    // the successor state will be the current state's path + a valid neighbor
+                    let mut succ_path = self.path();
+                    succ_path.push(neighbor_index as u32);
+                    let succ_state = State::new(succ_path, &adj_matrix).unwrap();
 
-                let succ_state = State::new(succ_path, &adj_matrix).unwrap();
-                successors.push(succ_state);
+                    // reject false Hamiltonian paths (those that can't be valid goal States)
+                    if (neighbor_index == (*first_node) as usize) && (!succ_state.is_goal(&adj_matrix)) {
+                        continue;
+                    }
+                    else {
+                        successors.push(succ_state);
+                    }
+                }
             }
         }
 
@@ -119,13 +145,12 @@ impl State {
     }
 }
 
-/// prints the best path found, its cost, and the number of expansions it made
+/// Prints the best path found, its cost, and the number of expansions it made
 ///
 /// # Arguments
 ///
 /// * `adj_matrix` - Adjacency matrix of graph
-/// * `start` - Starting node
-pub fn hill_climbing(adj_matrix: &Vec<Vec<u32>>, start: u32) -> String {
+pub fn hill_climbing(adj_matrix: &Vec<Vec<u32>>) -> String {
     unimplemented!();
 }
 
@@ -138,33 +163,22 @@ pub fn genetic(adj_matrix: &Vec<Vec<u32>>) -> String {
 }
 
 /// Runs and times the given algorithm (in both CPU and wall clock time, in seconds) with the
-/// given adjacency matrix and (optional) starting node
+/// given adjacency matrix
 ///
 /// # Arguments
 ///
 /// * `algo` - Algorithm to run
 /// * `adj_matrix` - Adjacency matrix of graph
-/// * `start` - Starting node (randomized if `None`)
 pub fn time_algo(
-    algo: fn(Vec<Vec<u32>>) -> (Vec<u32>, u32, u32),
-    adj_matrix: &Vec<Vec<u32>>,
-    start: Option<u32>
+    algo: fn(&Vec<Vec<u32>>) -> String,
+    adj_matrix: &Vec<Vec<u32>>
 ) -> String {
-    let mut start_actual = 0;
-
-    if let Some(s) = start {
-        start_actual = s;
-    }
-    else { // start from random node if no starting node given
-        start_actual = thread_rng().gen_range(0, adj_matrix.len()) as u32;
-    }
-
     // start timers
-    let wall_clock = howlong::HighResolutionClock::now();
-    let cpu_clock = howlong::ProcessCPUClock::now();
+    let wall_clock = howlong::clock::HighResolutionClock::now();
+    let cpu_clock = howlong::clock::ProcessCPUClock::now();
 
     // run algo!
-    let algo_results = algo(adj_matrix, start.unwrap());
+    let algo_results = algo(&adj_matrix);
 
     // end timers
     let total_wall_time = (howlong::HighResolutionClock::now() - wall_clock).as_secs();
@@ -173,7 +187,7 @@ pub fn time_algo(
     let total_cpu_time = elapsed_cpu_time.user.as_secs() + elapsed_cpu_time.system.as_secs();
 
     // output results
-    let output = "";
+    let mut output = String::new();
 
     write!(
         output,
@@ -262,8 +276,9 @@ mod state_tests {
             vec![42, 30, 0, 12], // 2
             vec![35, 34, 12, 0] //  3
         ];
-        let empty_path_err: Result<State, &'static str> = Err("States can't have an empty path!");
-        let oob_path_err: Result<State, &'static str> = Err("Invalid node, out of matrix's bounds!");
+        let empty_path_err: std::result::Result<State, &'static str> = Err("States can't have an empty path!");
+        let oob_path_err: std::result::Result<State, &'static str> = Err("Invalid node, out of matrix's bounds!");
+        let invalid_path_err: std::result::Result<State, &'static str> = Err("Node already in State path and not a valid Hamiltonian cycle!");
 
         let path_0: Vec<u32> = vec![0, 2, 1];
         let state_0 = State::new(path_0, &adj_matrix).unwrap();
@@ -294,20 +309,20 @@ mod state_tests {
         let path_6: Vec<u32> = vec![0, 1, 2, 3, 0];
         assert!(State::new(path_6, &adj_matrix).is_ok());
 
-        let path_7: Vec<u32> = vec![1, 1, 1];
-        assert!(State::new(path_7, &adj_matrix).is_ok());
+        let invalid_path_0: Vec<u32> = vec![1, 1, 1]; // invalid cycle with 1
+        assert_eq!(State::new(invalid_path_0, &adj_matrix), invalid_path_err);
 
-        let path_8: Vec<u32> = vec![0, 0, 0, 0, 0, 0];
-        assert!(State::new(path_8, &adj_matrix).is_ok());
+        let invalid_path_1: Vec<u32> = vec![0, 0, 0, 0, 0, 0]; // invalid cycle with 0
+        assert_eq!(State::new(invalid_path_1, &adj_matrix), invalid_path_err);
 
-        let path_9: Vec<u32> = vec![0, 1, 2, 3, 1];
-        assert!(State::new(path_9, &adj_matrix).is_ok());
+        let invalid_path_2: Vec<u32> = vec![0, 1, 2, 3, 1]; // invalid cycle with 1
+        assert_eq!(State::new(invalid_path_2, &adj_matrix), invalid_path_err);
 
-        let path_10: Vec<u32> = vec![0, 1, 2, 3, 1, 0];
-        assert!(State::new(path_10, &adj_matrix).is_ok());
+        let invalid_path_3: Vec<u32> = vec![0, 1, 2, 3, 1, 0]; // invalid cycle with 1
+        assert_eq!(State::new(invalid_path_3, &adj_matrix), invalid_path_err);
 
-        let invalid_path_0: Vec<u32> = vec![0, 1, 2, adj_matrix.len() as u32]; // out of bounds node
-        assert_eq!(State::new(invalid_path_0, &adj_matrix), oob_path_err);
+        let invalid_path_4: Vec<u32> = vec![0, 1, 2, adj_matrix.len() as u32]; // out of bounds node
+        assert_eq!(State::new(invalid_path_4, &adj_matrix), oob_path_err);
     }
 
     /// Tests State.is_goal()
@@ -343,9 +358,6 @@ mod state_tests {
 
         let goal_1 = State::new(vec![2, 0, 3, 1, 2], &adj_matrix).unwrap();
         assert!(goal_1.is_goal(&adj_matrix));
-
-        let goal_2 = State::new(vec![2, 0, 3, 2, 3, 2, 3, 2, 1, 2], &adj_matrix).unwrap();
-        assert!(goal_2.is_goal(&adj_matrix));
     }
 
     /// Tests State.successors()
@@ -357,7 +369,7 @@ mod state_tests {
             vec![8, 0, 8, 0],  // 1           │ ╰─┼────╮
             vec![11, 8, 0, 8], // 2           │╭──╯    │
             vec![8, 0, 8, 0]   // 3           2────────3
-        ];
+        ];                                    // only for testing; always use complete graphs!
 
         // 3 successors
         let state = State::new(vec![0], &adj_matrix).unwrap();
@@ -377,33 +389,28 @@ mod state_tests {
         // 2 successors from two nodes
         let state = State::new(vec![0, 2], &adj_matrix).unwrap();
         let state_succs = state.successors(&adj_matrix);
-        assert_eq!(state_succs.len(), 3);
-        assert!(state_succs.contains(&State::new(vec![0, 2, 0], &adj_matrix).unwrap()));
+        assert_eq!(state_succs.len(), 2);
         assert!(state_succs.contains(&State::new(vec![0, 2, 1], &adj_matrix).unwrap()));
         assert!(state_succs.contains(&State::new(vec![0, 2, 3], &adj_matrix).unwrap()));
 
-        // 3 successors with incomplete closed walks
+        // 1 successor
         let state = State::new(vec![0, 1, 2], &adj_matrix).unwrap();
         let state_succs = state.successors(&adj_matrix);
-        assert_eq!(state_succs.len(), 3);
-        assert!(state_succs.contains(&State::new(vec![0, 1, 2, 0], &adj_matrix).unwrap()));
-        assert!(state_succs.contains(&State::new(vec![0, 1, 2, 1], &adj_matrix).unwrap()));
+        assert_eq!(state_succs.len(), 1);
         assert!(state_succs.contains(&State::new(vec![0, 1, 2, 3], &adj_matrix).unwrap()));
 
-        // same as above but longer
+        // 1 successor which is a Hamiltonian path
         let state = State::new(vec![3, 0, 1, 2], &adj_matrix).unwrap();
         let state_succs = state.successors(&adj_matrix);
-        assert_eq!(state_succs.len(), 3);
+        assert_eq!(state_succs.len(), 1);
         assert!(state_succs.contains(&State::new(vec![3, 0, 1, 2, 3], &adj_matrix).unwrap()));
-        assert!(state_succs.contains(&State::new(vec![3, 0, 1, 2, 0], &adj_matrix).unwrap()));
-        assert!(state_succs.contains(&State::new(vec![3, 0, 1, 2, 1], &adj_matrix).unwrap()));
+        assert!(state_succs[0].is_goal(&adj_matrix));
 
         // no successors (goal)
         let state = State::new(vec![3, 0, 1, 2, 3], &adj_matrix).unwrap();
         let state_succs = state.successors(&adj_matrix);
         assert_eq!(state_succs.len(), 0);
         assert!(state_succs.is_empty());
-        assert!(state.is_goal(&adj_matrix));
     }
 
     #[test]
@@ -424,33 +431,30 @@ mod state_tests {
         assert!(state_succs.contains(&State::new(vec![2, 1], &adj_matrix).unwrap()));
         assert!(state_succs.contains(&State::new(vec![2, 3], &adj_matrix).unwrap()));
 
-        // 3 successors from two nodes
+        // 2 successors from two nodes
         let state = State::new(vec![1, 0], &adj_matrix).unwrap();
         let state_succs = state.successors(&adj_matrix);
-        assert_eq!(state_succs.len(), 3);
-        assert!(state_succs.contains(&State::new(vec![1, 0, 1], &adj_matrix).unwrap()));
+        assert_eq!(state_succs.len(), 2);
         assert!(state_succs.contains(&State::new(vec![1, 0, 2], &adj_matrix).unwrap()));
         assert!(state_succs.contains(&State::new(vec![1, 0, 3], &adj_matrix).unwrap()));
 
+        // 1 successor
         let state = State::new(vec![1, 2, 3], &adj_matrix).unwrap();
         let state_succs = state.successors(&adj_matrix);
-        assert_eq!(state_succs.len(), 3);
+        assert_eq!(state_succs.len(), 1);
         assert!(state_succs.contains(&State::new(vec![1, 2, 3, 0], &adj_matrix).unwrap()));
-        assert!(state_succs.contains(&State::new(vec![1, 2, 3, 1], &adj_matrix).unwrap()));
-        assert!(state_succs.contains(&State::new(vec![1, 2, 3, 2], &adj_matrix).unwrap()));
 
+        // 1 successor which is a Hamiltonian path
         let state = State::new(vec![1, 2, 3, 0], &adj_matrix).unwrap();
         let state_succs = state.successors(&adj_matrix);
-        assert_eq!(state_succs.len(), 3);
+        assert_eq!(state_succs.len(), 1);
         assert!(state_succs.contains(&State::new(vec![1, 2, 3, 0, 1], &adj_matrix).unwrap()));
-        assert!(state_succs.contains(&State::new(vec![1, 2, 3, 0, 2], &adj_matrix).unwrap()));
-        assert!(state_succs.contains(&State::new(vec![1, 2, 3, 0, 3], &adj_matrix).unwrap()));
+        assert!(state_succs[0].is_goal(&adj_matrix));
 
         // no successors (goal)
         let state = State::new(vec![2, 3, 0, 1, 2], &adj_matrix).unwrap();
         let state_succs = state.successors(&adj_matrix);
         assert_eq!(state_succs.len(), 0);
         assert!(state_succs.is_empty());
-        assert!(state.is_goal(&adj_matrix));
     }
 }
