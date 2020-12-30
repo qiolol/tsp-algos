@@ -219,6 +219,7 @@ impl fmt::Display for Graph {
 /// # Panics
 ///
 /// - if `n` is 0
+#[allow(dead_code)]
 pub fn generate_complete_random_graph<'a>(n: usize) -> Graph {
     if n == 0 {
         panic!("Graph size must be greater than zero!");
@@ -324,7 +325,7 @@ pub fn read_adj_matrix(filename: &str) -> Vec<Vec<u32>> {
         if (!line.is_empty()) && (i > 0) {
             let mut row: Vec<u32> = vec![];
 
-            for (j, edge) in line.split(' ').enumerate() {
+            for (_j, edge) in line.split(' ').enumerate() {
                 row.push(edge.parse().unwrap());
             }
             adj_matrix.push(row);

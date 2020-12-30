@@ -1,8 +1,8 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::fmt::Write as FmtWrite;
+use std::fmt::{Write, Display, Formatter};
 
-use rand::{thread_rng, Rng, seq::SliceRandom};
+use rand::seq::SliceRandom;
 
 use howlong::*;
 
@@ -38,6 +38,15 @@ impl Eq for State {}
 impl Hash for State {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.path.hash(state);
+    }
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "path: {:?}\n", self.path).unwrap();
+        write!(f, "cost: {}", self.cost).unwrap();
+
+        Ok(())
     }
 }
 
@@ -80,13 +89,13 @@ impl State {
         Ok(new_state)
     }
 
-    /// Get the State's path
-    fn path(&self) -> Vec<u32> {
+    /// Get a copy of the State's path
+    fn get_path(&self) -> Vec<u32> {
         self.path.to_vec()
     }
 
     /// Get the State's cost
-    fn cost(&self) -> u32 {
+    fn get_cost(&self) -> u32 {
         self.cost
     }
 
@@ -108,7 +117,7 @@ impl State {
     ///
     /// The sole exception of the first node is so that the the only cyclical paths returned are
     /// Hamiltonian cycles -- i.e., goal States -- which are the only valid cyclical States).
-    fn successors(&self, adj_matrix: &Vec<Vec<u32>>) -> Vec<State> {
+    fn get_successors(&self, adj_matrix: &Vec<Vec<u32>>) -> Vec<State> {
         let mut successors: Vec<State> = vec![];
 
         // stop if this state is a goal state
@@ -126,7 +135,7 @@ impl State {
                     (neighbor_index == (*first_node) as usize) // ...except for apparent Hamiltonian paths
                 {
                     // the successor state will be the current state's path + a valid neighbor
-                    let mut succ_path = self.path();
+                    let mut succ_path = self.get_path();
                     succ_path.push(neighbor_index as u32);
                     let succ_state = State::new(succ_path, &adj_matrix).unwrap();
 
@@ -143,15 +152,196 @@ impl State {
 
         return successors;
     }
+
+    /// Measures the cost of the State's path were the given swap of its elements (by index)
+    /// applied and returns the difference between the cost of the new path and the cost of the
+    /// original path
+    ///
+    /// E.g., if the original path has a cost of 5 and the proposed swap makes the path cost 3, the
+    /// returned value is -2.
+    ///
+    /// Returns an Err if the swap is invalid (attempting to swap the first or last node, swapping
+    /// the same element with itself, or swapping invalid elements)
+    ///
+    /// # Arguments
+    ///
+    /// * `i` - Index of element to swap with element at index `j`
+    /// * `j` - Index of element to swap with element at index `i`
+    /// * `adj_matrix` - Adjacency matrix of the graph
+    fn weigh_swap(&self, (i, j): (usize, usize), adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<i32, &str> {
+        if (i > 0) &&
+           (i < (self.path.len() - 1)) &&
+           (j > 0) &&
+           (j < (self.path.len() - 1)) &&
+           (i != j) &&
+           (self.path.len() > 1) {
+               let mut swapped_cost = 0;
+               let mut swapped_path = self.get_path();
+               let element_i = swapped_path[i];
+
+               swapped_path[i] = swapped_path[j];
+               swapped_path[j] = element_i;
+
+               for k in 0..(swapped_path.len() - 1) {
+                   swapped_cost += adj_matrix[swapped_path[k] as usize][swapped_path[k + 1] as usize];
+               }
+
+               return Ok(swapped_cost as i32 - self.cost as i32);
+        }
+        else {
+            return Err("Invalid swap!");
+        }
+    }
+
+    /// Carries out the given swap of elements (by index) in this State's path
+    ///
+    /// Returns an Err if the swap is invalid (attempting to swap the first or last node, swapping
+    /// the same element with itself, or swapping invalid elements)
+    ///
+    /// # Arguments
+    ///
+    /// * `i` - Index of element to swap with element at index `j`
+    /// * `j` - Index of element to swap with element at index `i`
+    /// * `adj_matrix` - Adjacency matrix of the graph
+    fn do_swap(&mut self, (i, j): (usize, usize), adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<(), &str> {
+        if (i > 0) &&
+           (i < (self.path.len() - 1)) &&
+           (j > 0) &&
+           (j < (self.path.len() - 1)) &&
+           (i != j) &&
+           (self.path.len() > 1) {
+            let element_i = self.path[i];
+
+            self.path[i] = self.path[j];
+            self.path[j] = element_i;
+
+            // recompute path cost
+            self.cost = 0;
+            for k in 0..(self.path.len() - 1) {
+                self.cost += adj_matrix[self.path[k] as usize][self.path[k + 1] as usize];
+            }
+
+            return Ok(());
+        }
+        else {
+            return Err("Invalid swap!");
+        }
+    }
+
+    /// Returns the index tuple of the two elements in this State's path whose swap reduces the
+    /// path's cost the most and None if no swaps reduce the cost
+    ///
+    /// # Arguments
+    ///
+    /// * `adj_matrix` - Adjacency matrix of the graph
+    fn find_best_swap(&self, adj_matrix: &Vec<Vec<u32>>) -> Option<(usize, usize)> {
+        let mut max_reduction: i32 = 0;
+        let mut swap_pair: (usize, usize) = (0, 0);
+
+        for i in 1..(self.path.len() - 1) {           // go from left to right across the path to
+            for j in (i + 1)..(self.path.len() - 1) { // avoid checking (3,1) after checking (1,3)
+                let reduction = self.weigh_swap((i, j), adj_matrix).unwrap();
+
+                if (reduction < 0) && (reduction < max_reduction) {
+                    max_reduction = reduction;
+                    swap_pair = (i, j);
+                }
+            }
+        }
+
+        if max_reduction < 0 {
+            return Some(swap_pair);
+        }
+        else {
+            return None;
+        }
+    }
 }
 
-/// Prints the best path found, its cost, and the number of expansions it made
+/// Returns a random Hamiltonian cycle (a tour beginning and ending at some node in
+/// the graph and visiting every other node exactly once) as a State, assuming the graph is complete
+///
+/// # Arguments
+///
+/// * `adj_matrix` - Adjacency matrix of the graph
+fn random_hamiltonian_cycle(adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<State, &str> {
+    if adj_matrix.len() < 2 {
+        return Err("Adjacency matrix too small!");
+    }
+    else {
+        for i in 0..adj_matrix.len() {
+            if adj_matrix[i].len() != adj_matrix.len() {
+                return Err("Adjacency matrix not square!");
+            }
+        }
+    }
+
+    let n = adj_matrix.len();
+    let mut cycle = vec![0; n];
+    let mut rng = rand::thread_rng();
+
+    for i in 0..n {
+        cycle[i] = i as u32;
+    }
+    cycle.shuffle(&mut rng);
+    cycle.push(cycle[0]); // return to start node
+
+    return State::new(cycle, adj_matrix);
+}
+
+/// ⛰️ Hill climbing is a simple, dumb, greedy search for the global maximum. At each step, it
+/// looks at each direction, and it steps in the direction of *steepest ascent* -- the neighboring
+/// state that increases the value the most. If no direction improves upon the value of the current
+/// state, it stops.
+///
+/// Naively, this parks it at the global maximum. Often, this only leads to the *local* maximum
+/// because, without more complex techniques, there's no way for the algorithm to know whether the
+/// global maximum is just beyond the next "valley". Starting from a random position (like this
+/// implementation does), choosing the next step with some randomness, and restarting randomly a
+/// number of times after finishing are ways to make hill climbing more effective at reaching the
+/// global maximum.
+///
+/// In the context of the TSP defined here, the "global maximum" is the global *minimum* of the
+/// path cost of a Hamiltonian cycle over the graph. The graphs used are complete, which *does*
+/// mean there can't be any local minima/maxima to get stuck at! Every node is connected to every
+/// other, so the optimal Hamiltonian cycle is reachable starting from any node. So our naive
+/// hill climbing algo here has nothing to worry about, right? Wrong! The problem is this algo
+/// operates on Hamiltonian cycles, not on the graph itself. It generates a cycle at random, and
+/// then it swaps pairs of elements around in hopes of reaching the optimal cycle, choosing the
+/// pair resulting in "steepest descent" each time.
+///
+/// Two assumptions are made:
+///
+/// 1. For any node, there's an optimal Hamiltonian cycle starting and ending with that node (put another way, the *one* optimal cycle is reachable from any node, and there's always a representation of this cycle that starts and ends with any given node)
+///
+/// 2. For any Hamiltonian cycle, the optimal Hamiltonian cycle is reachable via element swaps
+///
+/// The actual graph that a cycle runs over may be complete, but the *graph of all possible cycles* is *incomplete*! Imagining its nodes as possible Hamiltonian cycles and its edges as swaps, there's no guarantee that the optimal cycle is only one swap away from the cycle the algo starts with, so it's incomplete. Incomplete means the danger of local minima/maxima returns!
+/// Some series of swaps *is* going to get us to the optimal cycle, but this poor algo is limited
+/// to a single, narrow swap strategy: steepest descent. If the optimal cycle is separated from
+/// the current cycle by a swap that results in an *increase* in cost (or even a decrease less
+/// significant than the decrease of some other swap), the algo will never arrive at the optimal
+/// cycle -- it'll settle into some local minimum.
+///
+/// Deviously, this only apparent for graphs of 5 nodes or more (5 may take a few tries to see a
+/// deviation in the returned cost; 6 or more is more obvious). A mathematically-inclined friend
+/// patiently explained this is because, for sufficiently small cycles, whatever contrived
+/// "rotations" of nodes in the cycle's path necessary to get to the optimum are equivalent to
+/// steepest-descent swaps.
+///
+/// Returns the best path found and its cost
 ///
 /// # Arguments
 ///
 /// * `adj_matrix` - Adjacency matrix of graph
 pub fn hill_climbing(adj_matrix: &Vec<Vec<u32>>) -> String {
-    unimplemented!();
+    let mut s: State = random_hamiltonian_cycle(adj_matrix).unwrap();
+
+    while let Some(best_candidate) = s.find_best_swap(adj_matrix) {
+        s.do_swap(best_candidate, adj_matrix).unwrap();
+    }
+
+    return format!("{}", s).to_string();
 }
 
 pub fn simulated_annealing(adj_matrix: &Vec<Vec<u32>>) -> String {
@@ -204,7 +394,7 @@ mod state_tests {
 
     /// Tests State hash and equality: k1 == k2 -> hash(k1) == hash(k2)
     #[test]
-    fn state_hash_eq() {
+    fn hash_eq() {
         use std::collections::hash_map::DefaultHasher;
 
         // comparison and hashing is path-based; these shouldn't be equal
@@ -268,7 +458,7 @@ mod state_tests {
 
     /// Tests State constructor from paths
     #[test]
-    fn state_ctor() {
+    fn ctor() {
         let adj_matrix: Vec<Vec<u32>> = vec![
             //   0  1   2   3
             vec![0, 20, 42, 35], // 0
@@ -282,26 +472,26 @@ mod state_tests {
 
         let path_0: Vec<u32> = vec![0, 2, 1];
         let state_0 = State::new(path_0, &adj_matrix).unwrap();
-        assert_eq!(state_0.cost(), 72); // cost: 42 + 30 = 72
-        assert_eq!(state_0.path(), vec![0, 2, 1]);
+        assert_eq!(state_0.get_cost(), 72); // cost: 42 + 30 = 72
+        assert_eq!(state_0.get_path(), vec![0, 2, 1]);
 
         let path_1: Vec<u32> = vec![3];
         let state_1 = State::new(path_1, &adj_matrix).unwrap();
-        assert_eq!(state_1.cost(), 0); // cost: 0
-        assert_eq!(state_1.path(), vec![3]);
+        assert_eq!(state_1.get_cost(), 0); // cost: 0
+        assert_eq!(state_1.get_path(), vec![3]);
 
         let path_2: Vec<u32> = vec![];
         assert_eq!(State::new(path_2, &adj_matrix), empty_path_err);
 
         let path_3: Vec<u32> = vec![1, 1];
         let state_3 = State::new(path_3, &adj_matrix).unwrap();
-        assert_eq!(state_3.cost(), 0); // cost: 0
-        assert_eq!(state_3.path(), vec![1, 1]);
+        assert_eq!(state_3.get_cost(), 0); // cost: 0
+        assert_eq!(state_3.get_path(), vec![1, 1]);
 
         let path_4: Vec<u32> = vec![1, 0, 1];
         let state_4 = State::new(path_4, &adj_matrix).unwrap();
-        assert_eq!(state_4.cost(), 40); // cost: 20 + 20 = 40
-        assert_eq!(state_4.path(), vec![1, 0, 1]);
+        assert_eq!(state_4.get_cost(), 40); // cost: 20 + 20 = 40
+        assert_eq!(state_4.get_path(), vec![1, 0, 1]);
 
         let path_5: Vec<u32> = vec![0, 1, 2, 3];
         assert!(State::new(path_5, &adj_matrix).is_ok());
@@ -327,7 +517,7 @@ mod state_tests {
 
     /// Tests State.is_goal()
     #[test]
-    fn state_is_goal() {
+    fn is_goal() {
         let adj_matrix: Vec<Vec<u32>> = vec![
             //   0  1   2   3
             vec![0, 20, 42, 35], // 0
@@ -360,9 +550,9 @@ mod state_tests {
         assert!(goal_1.is_goal(&adj_matrix));
     }
 
-    /// Tests State.successors()
+    /// Tests State.get_successors()
     #[test]
-    fn state_successors_incomplete() {
+    fn successors_incomplete() {
         let adj_matrix: Vec<Vec<u32>> = vec![ // incomplete graph!
             //   0  1  2   3                  0────────1
             vec![0, 8, 11, 8], // 0           │╲  ╭────╯
@@ -373,7 +563,7 @@ mod state_tests {
 
         // 3 successors
         let state = State::new(vec![0], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 3);
         assert!(state_succs.contains(&State::new(vec![0, 1], &adj_matrix).unwrap()));
         assert!(state_succs.contains(&State::new(vec![0, 2], &adj_matrix).unwrap()));
@@ -381,40 +571,40 @@ mod state_tests {
 
         // 2 successors from single node
         let state = State::new(vec![3], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 2);
         assert!(state_succs.contains(&State::new(vec![3, 0], &adj_matrix).unwrap()));
         assert!(state_succs.contains(&State::new(vec![3, 2], &adj_matrix).unwrap()));
 
         // 2 successors from two nodes
         let state = State::new(vec![0, 2], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 2);
         assert!(state_succs.contains(&State::new(vec![0, 2, 1], &adj_matrix).unwrap()));
         assert!(state_succs.contains(&State::new(vec![0, 2, 3], &adj_matrix).unwrap()));
 
         // 1 successor
         let state = State::new(vec![0, 1, 2], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 1);
         assert!(state_succs.contains(&State::new(vec![0, 1, 2, 3], &adj_matrix).unwrap()));
 
         // 1 successor which is a Hamiltonian path
         let state = State::new(vec![3, 0, 1, 2], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 1);
         assert!(state_succs.contains(&State::new(vec![3, 0, 1, 2, 3], &adj_matrix).unwrap()));
         assert!(state_succs[0].is_goal(&adj_matrix));
 
         // no successors (goal)
         let state = State::new(vec![3, 0, 1, 2, 3], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 0);
         assert!(state_succs.is_empty());
     }
 
     #[test]
-    fn state_succesors_complete() {
+    fn succesors_complete() {
         let adj_matrix: Vec<Vec<u32>> = vec![
             //   0  1   2   3
             vec![0, 20, 42, 35], // 0
@@ -425,7 +615,7 @@ mod state_tests {
 
         // 3 successors
         let state = State::new(vec![2], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 3);
         assert!(state_succs.contains(&State::new(vec![2, 0], &adj_matrix).unwrap()));
         assert!(state_succs.contains(&State::new(vec![2, 1], &adj_matrix).unwrap()));
@@ -433,28 +623,241 @@ mod state_tests {
 
         // 2 successors from two nodes
         let state = State::new(vec![1, 0], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 2);
         assert!(state_succs.contains(&State::new(vec![1, 0, 2], &adj_matrix).unwrap()));
         assert!(state_succs.contains(&State::new(vec![1, 0, 3], &adj_matrix).unwrap()));
 
         // 1 successor
         let state = State::new(vec![1, 2, 3], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 1);
         assert!(state_succs.contains(&State::new(vec![1, 2, 3, 0], &adj_matrix).unwrap()));
 
         // 1 successor which is a Hamiltonian path
         let state = State::new(vec![1, 2, 3, 0], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 1);
         assert!(state_succs.contains(&State::new(vec![1, 2, 3, 0, 1], &adj_matrix).unwrap()));
         assert!(state_succs[0].is_goal(&adj_matrix));
 
         // no successors (goal)
         let state = State::new(vec![2, 3, 0, 1, 2], &adj_matrix).unwrap();
-        let state_succs = state.successors(&adj_matrix);
+        let state_succs = state.get_successors(&adj_matrix);
         assert_eq!(state_succs.len(), 0);
         assert!(state_succs.is_empty());
+    }
+
+    #[test]
+    fn weigh_swap() {
+        let adj_matrix: Vec<Vec<u32>> = vec![
+            //   0  1   2   3
+            vec![0, 20, 42, 35], // 0
+            vec![20, 0, 30, 34], // 1
+            vec![42, 30, 0, 12], // 2
+            vec![35, 34, 12, 0] //  3
+        ];
+                                           // i: 0  1  2  3  4
+        let s_goal_path: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
+        assert_eq!(s_goal_path.get_cost(), 108);
+
+        // swapping 1 and 2 yields a path costing 141, which is a delta of 141 - 108 = 33
+        assert_eq!(s_goal_path.weigh_swap((1, 2), &adj_matrix).unwrap(), 33);
+        assert_eq!(s_goal_path.weigh_swap((2, 1), &adj_matrix).unwrap(), 33);
+
+        // swapping 2 and 3 yields 97, which is a delta of -11
+        assert_eq!(s_goal_path.weigh_swap((2, 3), &adj_matrix).unwrap(), -11);
+        assert_eq!(s_goal_path.weigh_swap((3, 2), &adj_matrix).unwrap(), -11);
+
+        // swapping 1 and 3 yields the same cost as before, 108, for a delta of 0
+        assert_eq!(s_goal_path.weigh_swap((1, 3), &adj_matrix).unwrap(), 0);
+        assert_eq!(s_goal_path.weigh_swap((3, 1), &adj_matrix).unwrap(), 0);
+
+                                      // i: 0  1  2  3
+        let s_path: State = State::new(vec![0, 2, 3, 0], &adj_matrix).unwrap();
+        assert_eq!(s_path.get_cost(), 89);
+
+        assert_eq!(s_path.weigh_swap((1, 2), &adj_matrix).unwrap(), 0);
+        assert_eq!(s_path.weigh_swap((2, 1), &adj_matrix).unwrap(), 0);
+    }
+
+    #[test]
+    fn weigh_swap_bad() {
+        let adj_matrix: Vec<Vec<u32>> = vec![
+            //   0  1   2   3
+            vec![0, 20, 42, 35], // 0
+            vec![20, 0, 30, 34], // 1
+            vec![42, 30, 0, 12], // 2
+            vec![35, 34, 12, 0] //  3
+        ];
+        let s: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
+
+        // invalid elts (terminal nodes)
+        assert!(s.weigh_swap((0, 1), &adj_matrix).is_err());
+        assert!(s.weigh_swap((3, 4), &adj_matrix).is_err());
+        assert!(s.weigh_swap((4, 3), &adj_matrix).is_err());
+        assert!(s.weigh_swap((4, 0), &adj_matrix).is_err());
+
+        // out of bounds
+        assert!(s.weigh_swap((1, 5), &adj_matrix).is_err());
+        assert!(s.weigh_swap((6, 2), &adj_matrix).is_err());
+
+        // same elt
+        assert!(s.weigh_swap((2, 2), &adj_matrix).is_err());
+        assert!(s.weigh_swap((0, 0), &adj_matrix).is_err());
+
+        // 1-elt state path
+        let s: State = State::new(vec![0], &adj_matrix).unwrap();
+
+        assert!(s.weigh_swap((0, 0), &adj_matrix).is_err());
+        assert!(s.weigh_swap((1, 2), &adj_matrix).is_err());
+
+        // 2-elt state path
+        let s: State = State::new(vec![0, 1], &adj_matrix).unwrap();
+
+        assert!(s.weigh_swap((0, 1), &adj_matrix).is_err());
+        assert!(s.weigh_swap((1, 0), &adj_matrix).is_err());
+    }
+
+    #[test]
+    fn do_swap() {
+        let adj_matrix: Vec<Vec<u32>> = vec![
+            //   0  1   2   3
+            vec![0, 20, 42, 35], // 0
+            vec![20, 0, 30, 34], // 1
+            vec![42, 30, 0, 12], // 2
+            vec![35, 34, 12, 0] //  3
+        ];
+        let mut s: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
+
+        assert_eq!(s.get_cost(), 108);
+        assert_eq!(s.get_path(), vec![0, 1, 3, 2, 0]);
+
+        s.do_swap((1, 2), &adj_matrix).unwrap();
+
+        assert_eq!(s.get_cost(), 141);
+        assert_eq!(s.get_path(), vec![0, 3, 1, 2, 0]);
+    }
+
+    #[test]
+    fn do_swap_bad() {
+        let adj_matrix: Vec<Vec<u32>> = vec![
+            //   0  1   2   3
+            vec![0, 20, 42, 35], // 0
+            vec![20, 0, 30, 34], // 1
+            vec![42, 30, 0, 12], // 2
+            vec![35, 34, 12, 0] //  3
+        ];
+        let mut s: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
+
+        // invalid elts (terminal nodes)
+        assert!(s.do_swap((0, 1), &adj_matrix).is_err());
+        assert!(s.do_swap((3, 4), &adj_matrix).is_err());
+        assert!(s.do_swap((4, 3), &adj_matrix).is_err());
+        assert!(s.do_swap((4, 0), &adj_matrix).is_err());
+
+        // out of bounds
+        assert!(s.do_swap((1, 5), &adj_matrix).is_err());
+        assert!(s.do_swap((6, 2), &adj_matrix).is_err());
+
+        // same elt
+        assert!(s.do_swap((2, 2), &adj_matrix).is_err());
+        assert!(s.do_swap((0, 0), &adj_matrix).is_err());
+
+        // 1-elt state path
+        let mut s: State = State::new(vec![0], &adj_matrix).unwrap();
+
+        assert!(s.do_swap((0, 0), &adj_matrix).is_err());
+        assert!(s.do_swap((1, 2), &adj_matrix).is_err());
+
+        // 2-elt state path
+        let mut s: State = State::new(vec![0, 1], &adj_matrix).unwrap();
+
+        assert!(s.do_swap((0, 1), &adj_matrix).is_err());
+        assert!(s.do_swap((1, 0), &adj_matrix).is_err());
+    }
+
+    #[test]
+    fn find_best_swap() {
+        let adj_matrix: Vec<Vec<u32>> = vec![
+            //   0  1   2   3
+            vec![0, 20, 42, 35], // 0
+            vec![20, 0, 30, 34], // 1
+            vec![42, 30, 0, 12], // 2
+            vec![35, 34, 12, 0] //  3
+        ];
+        let s: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
+
+        assert_eq!(s.get_cost(), 108);
+
+        // the ideal config is [0, 1, 2, 3, 0], which costs 97
+        assert!(s.find_best_swap(&adj_matrix).is_some());
+        assert_eq!(s.find_best_swap(&adj_matrix).unwrap(), (2, 3));
+    }
+
+    #[test]
+    fn find_best_swap_none() {
+        let adj_matrix: Vec<Vec<u32>> = vec![
+            //   0  1   2   3
+            vec![0, 20, 42, 35], // 0
+            vec![20, 0, 30, 34], // 1
+            vec![42, 30, 0, 12], // 2
+            vec![35, 34, 12, 0] //  3
+        ];
+        let s: State = State::new(vec![0, 1, 2, 3, 0], &adj_matrix).unwrap();
+
+        assert_eq!(s.get_cost(), 97);
+
+        // already in ideal config; no profitable swap exists
+        assert!(s.find_best_swap(&adj_matrix).is_none());
+    }
+}
+
+#[cfg(test)]
+mod random_hamiltonian_cycle_tests {
+    use super::*;
+
+    #[test]
+    fn args_too_small() {
+        let err: std::result::Result<State, &'static str> = Err("Adjacency matrix too small!");
+
+        let empty_adj_matrix = vec![];
+        assert_eq!(empty_adj_matrix.len(), 0);
+        assert_eq!(random_hamiltonian_cycle(&empty_adj_matrix), err);
+
+        let singleton_adj_matrix = vec![vec![1]];
+        assert_eq!(singleton_adj_matrix.len(), 1);
+        assert_eq!(random_hamiltonian_cycle(&singleton_adj_matrix), err);
+    }
+
+    #[test]
+    fn args_not_square() {
+        let err: std::result::Result<State, &'static str> = Err("Adjacency matrix not square!");
+
+        let non_square_adj_matrix_0 = vec![vec![0, 1], vec![]];
+        assert_eq!(random_hamiltonian_cycle(&non_square_adj_matrix_0), err);
+
+        let non_square_adj_matrix_1 = vec![vec![0, 1], vec![0]];
+        assert_eq!(random_hamiltonian_cycle(&non_square_adj_matrix_1), err);
+
+        let non_square_adj_matrix_2 = vec![vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8, 9]];
+        assert_eq!(random_hamiltonian_cycle(&non_square_adj_matrix_2), err);
+    }
+
+    #[test]
+    fn args_good() {
+        let adj_matrix = vec![
+            vec![0, 1, 2, 3],
+            vec![0, 1, 2, 3],
+            vec![0, 1, 2, 3],
+            vec![0, 1, 2, 3]
+        ];
+
+        assert!(random_hamiltonian_cycle(&adj_matrix).is_ok());
+
+        let s: State = random_hamiltonian_cycle(&adj_matrix).unwrap();
+
+        assert!(s.is_goal(&adj_matrix));
+        assert_eq!(s.get_path().len(), adj_matrix.len() + 1);
     }
 }
