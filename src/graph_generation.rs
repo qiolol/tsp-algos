@@ -7,9 +7,9 @@
 //! * weighted
 //! * completely connected
 //! * made of nodes whose edges follow the triangle inequality
-//! (going from A to B is cheaper than going from A to C to B. Nodes are generated
+//! (going directly from A to B is cheaper than going from A to C to B. Nodes are generated
 //! as coordinate pairs on a 2D plane, so any three nodes, like the three vertices of
-//! a triangle, follow the triangle inquality.)
+//! a triangle, follow the triangle inequality.)
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::File;
