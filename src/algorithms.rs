@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::fmt::{Write, Display, Formatter};
+use std::fmt::{Display, Formatter};
 
 use rand::{thread_rng, Rng, seq::SliceRandom};
 
@@ -43,7 +43,7 @@ impl Hash for State {
 
 impl Display for State {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "path: {:?}\n", self.path).unwrap();
+        writeln!(f, "path: {:?}", self.path).unwrap();
         write!(f, "cost: {}", self.cost).unwrap();
 
         Ok(())
@@ -53,7 +53,7 @@ impl Display for State {
 impl State {
     /// Construct a new State with the given path and its computed cost based on the edges in the
     /// given adjacency matrix
-    fn new(path: Vec<u32>, adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<Self, &str> {
+    fn new(path: Vec<u32>, adj_matrix: &[Vec<u32>]) -> std::result::Result<Self, &str> {
         // all states must have at least one node in their path
         if path.is_empty() {
             return Err("States can't have an empty path!");
@@ -101,15 +101,15 @@ impl State {
 
     /// Returns whether this State is a goal State (a Hamiltonian cycle over the given adjacency
     /// matrix)
-    fn is_goal(&self, adj_matrix: &Vec<Vec<u32>>) -> bool {
+    fn is_goal(&self, adj_matrix: &[Vec<u32>]) -> bool {
         // all nodes (as indices of adj_matrix) must be in the path
         for i in 0..adj_matrix.len() {
             if !self.path.contains(&(i as u32)) {
-                return false;
+                return false
             }
         }
         // and the path's last element must also be its first
-        return self.path.first() == self.path.last();
+        self.path.first() == self.path.last()
     }
 
     /// Return the set of States containing the neighbors of this State's last ("current") node
@@ -117,12 +117,12 @@ impl State {
     ///
     /// The sole exception of the first node is so that the the only cyclical paths returned are
     /// Hamiltonian cycles -- i.e., goal States -- which are the only valid cyclical States).
-    fn get_successors(&self, adj_matrix: &Vec<Vec<u32>>) -> Vec<State> {
+    fn get_successors(&self, adj_matrix: &[Vec<u32>]) -> Vec<State> {
         let mut successors: Vec<State> = vec![];
 
         // stop if this state is a goal state
         if self.is_goal(adj_matrix) {
-            return successors;
+            return successors
         }
 
         let current_node = self.path.last().unwrap();
@@ -150,7 +150,7 @@ impl State {
             }
         }
 
-        return successors;
+        successors
     }
 
     /// Measures the cost of the State's path were the given swap of its elements (by index)
@@ -168,7 +168,7 @@ impl State {
     /// * `i` - Index of element to swap with element at index `j`
     /// * `j` - Index of element to swap with element at index `i`
     /// * `adj_matrix` - Adjacency matrix of the graph
-    fn weigh_swap(&self, (i, j): (usize, usize), adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<i32, &str> {
+    fn weigh_swap(&self, (i, j): (usize, usize), adj_matrix: &[Vec<u32>]) -> std::result::Result<i32, &str> {
         if (i > 0) &&
            (i < (self.path.len() - 1)) &&
            (j > 0) &&
@@ -177,19 +177,17 @@ impl State {
            (self.path.len() > 1) {
                let mut swapped_cost = 0;
                let mut swapped_path = self.get_path();
-               let element_i = swapped_path[i];
 
-               swapped_path[i] = swapped_path[j];
-               swapped_path[j] = element_i;
+               swapped_path.swap(i, j);
 
                for k in 0..(swapped_path.len() - 1) {
                    swapped_cost += adj_matrix[swapped_path[k] as usize][swapped_path[k + 1] as usize];
                }
 
-               return Ok(swapped_cost as i32 - self.cost as i32);
+               Ok(swapped_cost as i32 - self.cost as i32)
         }
         else {
-            return Err("Invalid swap!");
+            Err("Invalid swap!")
         }
     }
 
@@ -203,17 +201,14 @@ impl State {
     /// * `i` - Index of element to swap with element at index `j`
     /// * `j` - Index of element to swap with element at index `i`
     /// * `adj_matrix` - Adjacency matrix of the graph
-    fn do_swap(&mut self, (i, j): (usize, usize), adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<(), &str> {
+    fn do_swap(&mut self, (i, j): (usize, usize), adj_matrix: &[Vec<u32>]) -> std::result::Result<(), &str> {
         if (i > 0) &&
            (i < (self.path.len() - 1)) &&
            (j > 0) &&
            (j < (self.path.len() - 1)) &&
            (i != j) &&
            (self.path.len() > 1) {
-            let element_i = self.path[i];
-
-            self.path[i] = self.path[j];
-            self.path[j] = element_i;
+            self.path.swap(i, j);
 
             // recompute path cost
             self.cost = 0;
@@ -221,10 +216,10 @@ impl State {
                 self.cost += adj_matrix[self.path[k] as usize][self.path[k + 1] as usize];
             }
 
-            return Ok(());
+            Ok(())
         }
         else {
-            return Err("Invalid swap!");
+            Err("Invalid swap!")
         }
     }
 
@@ -234,7 +229,7 @@ impl State {
     /// # Arguments
     ///
     /// * `adj_matrix` - Adjacency matrix of the graph
-    fn find_best_swap(&self, adj_matrix: &Vec<Vec<u32>>) -> Option<(usize, usize)> {
+    fn find_best_swap(&self, adj_matrix: &[Vec<u32>]) -> Option<(usize, usize)> {
         let mut max_reduction: i32 = 0;
         let mut swap_pair: (usize, usize) = (0, 0);
 
@@ -250,10 +245,10 @@ impl State {
         }
 
         if max_reduction < 0 {
-            return Some(swap_pair);
+            Some(swap_pair)
         }
         else {
-            return None;
+            None
         }
     }
 }
@@ -264,14 +259,14 @@ impl State {
 /// # Arguments
 ///
 /// * `adj_matrix` - Adjacency matrix of the graph
-fn random_hamiltonian_cycle(adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<State, &str> {
+fn random_hamiltonian_cycle(adj_matrix: &[Vec<u32>]) -> std::result::Result<State, &str> {
     if adj_matrix.len() < 2 {
-        return Err("Adjacency matrix too small!");
+        return Err("Adjacency matrix too small!")
     }
     else {
         for i in 0..adj_matrix.len() {
             if adj_matrix[i].len() != adj_matrix.len() {
-                return Err("Adjacency matrix not square!");
+                return Err("Adjacency matrix not square!")
             }
         }
     }
@@ -280,13 +275,13 @@ fn random_hamiltonian_cycle(adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<S
     let mut cycle = vec![0; n];
     let mut rng = rand::thread_rng();
 
-    for i in 0..n {
-        cycle[i] = i as u32;
+    for (i, elt) in cycle.iter_mut().enumerate() {
+        *elt = i as u32;
     }
     cycle.shuffle(&mut rng);
     cycle.push(cycle[0]); // return to start node
 
-    return State::new(cycle, adj_matrix);
+    State::new(cycle, adj_matrix)
 }
 
 /// Returns the best Hamiltonian cycle, and its cost, found via hill climbing
@@ -300,14 +295,14 @@ fn random_hamiltonian_cycle(adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<S
 /// # Arguments
 ///
 /// * `adj_matrix` - Adjacency matrix of graph
-pub fn hill_climbing(adj_matrix: &Vec<Vec<u32>>) -> String {
+pub fn hill_climbing(adj_matrix: &[Vec<u32>]) -> String {
     let mut s: State = random_hamiltonian_cycle(adj_matrix).unwrap();
 
     while let Some(best_candidate) = s.find_best_swap(adj_matrix) {
         s.do_swap(best_candidate, adj_matrix).unwrap();
     }
 
-    return format!("{}", s).to_string();
+    format!("{}", s)
 }
 
 /// Returns the best Hamiltonian cycle, and its cost, found via simulated annealing
@@ -328,7 +323,7 @@ pub fn hill_climbing(adj_matrix: &Vec<Vec<u32>>) -> String {
 /// # Arguments
 ///
 /// * `adj_matrix` - Adjacency matrix of graph
-pub fn simulated_annealing(adj_matrix: &Vec<Vec<u32>>) -> String {
+pub fn simulated_annealing(adj_matrix: &[Vec<u32>]) -> String {
     let mut s: State = random_hamiltonian_cycle(adj_matrix).unwrap();
     let n: usize = adj_matrix.len();
 
@@ -338,11 +333,10 @@ pub fn simulated_annealing(adj_matrix: &Vec<Vec<u32>>) -> String {
     let mut rng = thread_rng();
     let mut delta: i32;
 
-    let mut t: u32 = 0;
     loop {
         temperature *= 1.0 - cooling_rate; // lower temperature
         if temperature < 1.0 {
-            return format!("{}", s).to_string();
+            return format!("{}", s)
         }
 
         let i = rng.gen_range(1..(n - 1));
@@ -365,16 +359,14 @@ pub fn simulated_annealing(adj_matrix: &Vec<Vec<u32>>) -> String {
             // this uses the Boltzmann distribution to gradually settle on the final (and hopefully
             // global) minimum
 
-            if rng.gen_bool(p) == true {
+            if rng.gen_bool(p) {
                 s.do_swap((i, j), adj_matrix).unwrap();
             }
         }
-
-        t += 1;
     }
 }
 
-pub fn genetic(adj_matrix: &Vec<Vec<u32>>) -> String {
+pub fn genetic(adj_matrix: &[Vec<u32>]) -> String {
     unimplemented!();
 }
 
@@ -386,8 +378,8 @@ pub fn genetic(adj_matrix: &Vec<Vec<u32>>) -> String {
 /// * `algo` - Algorithm to run
 /// * `adj_matrix` - Adjacency matrix of graph
 pub fn time_algo(
-    algo: fn(&Vec<Vec<u32>>) -> String,
-    adj_matrix: &Vec<Vec<u32>>
+    algo: fn(&[Vec<u32>]) -> String,
+    adj_matrix: &[Vec<u32>]
 ) -> String {
     // start timers
     let wall_clock = howlong::clock::HighResolutionClock::now();
@@ -403,15 +395,10 @@ pub fn time_algo(
     let total_cpu_time = elapsed_cpu_time.user.as_secs() + elapsed_cpu_time.system.as_secs();
 
     // output results
-    let mut output = String::new();
-
-    write!(
-        output,
+    format!(
         "{}\nwall time (seconds): {}\ncpu time (seconds): {}",
         algo_results, total_wall_time, total_cpu_time
-    ).unwrap();
-
-    return output;
+    )
 }
 
 #[cfg(test)]

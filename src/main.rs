@@ -1,5 +1,7 @@
+#[allow(dead_code)]
 mod graph_generation;
 use graph_generation::*;
+#[allow(dead_code)]
 mod algorithms;
 use algorithms::*;
 

@@ -46,18 +46,16 @@ impl Graph {
     }
 
     /// Returns the number of nodes in the Graph
-    #[allow(dead_code)]
     fn size(&self) -> usize {
         self.size
     }
 
     /// Returns the Graph's nodes in a Vec
     fn get_nodes(&self) -> Vec<Point> {
-        return self.nodes.iter().map(|&x| x).collect();
+        self.nodes.iter().copied().collect()
     }
 
     /// Returns the Point with the specified id in an Option
-    #[allow(dead_code)]
     fn get_node(&self, id: u32) -> Option<Point> {
         if self.adj_list.contains_key(&id) {
             if let Some(node_ref) = self.get_nodes().iter().find(|&&x| x.id == id) {
@@ -65,14 +63,13 @@ impl Graph {
             }
         }
 
-        return None;
+        None
     }
 
     /// Returns a Point p's neighbors in a Result-wrapped Vec
-    #[allow(dead_code)]
     fn get_neighbors(&self, p: &Point) -> Result<Vec<Point>, &'static str> {
         if !self.nodes.contains(p) {
-            return Err("Point not in graph!");
+            return Err("Point not in graph!")
         }
 
         let neighbor_ids = self.adj_list.get(&p.id).unwrap();
@@ -86,24 +83,18 @@ impl Graph {
             }
         }
 
-        return Ok(neighbor_points);
+        Ok(neighbor_points)
     }
 
     /// Returns whether the Graph contains Point p
     fn has_node(&self, p: &Point) -> bool {
-        return self.nodes.contains(p) && self.adj_list.contains_key(&p.id);
+        self.nodes.contains(p) && self.adj_list.contains_key(&p.id)
     }
 
     /// Returns whether the Graph contains a Point with the given id
     /// (riskier convenience function; Points are not equality tested by id alone)
-    #[allow(dead_code)]
     fn has_node_by_id(&self, id: u32) -> bool {
-        if let Some(_) = self.get_node(id) {
-            return true;
-        }
-        else {
-            return false;
-        }
+        self.get_node(id).is_some()
     }
 
     /// Returns whether the Graph has an edge between Points p1 and p2
@@ -113,18 +104,17 @@ impl Graph {
                 self.adj_list.get(&p2.id).unwrap().contains(&p1.id);
         }
 
-        return false;
+        false
     }
 
     /// Returns whether the Graph has an edge between two Points with ids id1 and id2
     /// (riskier convenience function; Points are not equality tested by id alone)
-    #[allow(dead_code)]
     fn has_edge_by_id(&self, id1: u32, id2: u32) -> bool {
         if self.has_node_by_id(id1) && self.has_node_by_id(id2) {
             return self.has_edge(&self.get_node(id1).unwrap(), &self.get_node(id2).unwrap());
         }
 
-        return false;
+        false
     }
 
     /// Adds a Point as a node to the Graph
@@ -137,7 +127,7 @@ impl Graph {
     /// * `p` - Point to add to the Graph
     fn add_node(&mut self, p: Point) -> Result<(), &'static str> {
         if self.nodes.contains(&p) {
-            return Err("Point already in Graph!");
+            Err("Point already in Graph!")
         }
         else {
             // p wasn't in the Graph, but another Point with the same coordinates or id might be.
@@ -147,12 +137,12 @@ impl Graph {
             // Similarly, a point with the same id but different coordinates might be in here.
             // Check for redundant id
             if self.adj_list.contains_key(&p.id) {
-                return Err("Point ID already in Graph with different coordinates!");
+                return Err("Point ID already in Graph with different coordinates!")
             }
             // Check for redundant coords
             for point in &self.nodes {
                 if (p.x == point.x) && (p.y == point.y) {
-                    return Err("Point coordinates already in Graph with different ID!");
+                    return Err("Point coordinates already in Graph with different ID!")
                 }
             }
 
@@ -160,7 +150,7 @@ impl Graph {
             self.adj_list.insert(p.id, HashSet::<u32>::new());
             self.size += 1;
 
-            return Ok(());
+            Ok(())
         }
     }
 
@@ -174,10 +164,10 @@ impl Graph {
     /// * `p2` - Point to connect to `p1`
     fn add_edge(&mut self, p1: &Point, p2: &Point) -> Result<(), &'static str> {
         if !self.has_node(p1) || !self.has_node(p2) {
-            return Err("Point(s) not in Graph!");
+            return Err("Point(s) not in Graph!")
         }
         else if self.has_edge(p1, p2) {
-            return Err("Edge already in Graph!");
+            return Err("Edge already in Graph!")
         }
 
         let p1_neighbors = self.adj_list.get_mut(&p1.id).unwrap();
@@ -186,7 +176,7 @@ impl Graph {
         let p2_neighbors = self.adj_list.get_mut(&p2.id).unwrap();
         p2_neighbors.insert(p1.id);
 
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -194,7 +184,7 @@ impl fmt::Display for Graph {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let n = self.size;
 
-        write!(f, "{}\n", n).unwrap();
+        writeln!(f, "{}", n).unwrap();
         for i in 0..n {
             for j in 0..n {
                 write!(f, "{}", self.adj_matrix[i][j]).unwrap();
@@ -202,7 +192,7 @@ impl fmt::Display for Graph {
                     write!(f, " ").unwrap();
                 }
             }
-            write!(f, "\n").unwrap();
+            writeln!(f).unwrap();
         }
         Ok(())
     }
@@ -219,8 +209,7 @@ impl fmt::Display for Graph {
 /// # Panics
 ///
 /// - if `n` is 0
-#[allow(dead_code)]
-pub fn generate_complete_random_graph<'a>(n: usize) -> Graph {
+pub fn generate_complete_random_graph(n: usize) -> Graph {
     if n == 0 {
         panic!("Graph size must be greater than zero!");
     }
@@ -247,7 +236,7 @@ pub fn generate_complete_random_graph<'a>(n: usize) -> Graph {
 
     // add to each node edges to every other node
     for node in &keys {
-        let other_nodes: Vec<Point> = keys.iter().filter(|&&x| x != *node).map(|&x| x).collect();
+        let other_nodes: Vec<Point> = keys.iter().filter(|&&x| x != *node).copied().collect();
 
         for other_node in other_nodes.iter() {
             if !graph.has_edge(node, other_node) {
@@ -285,7 +274,7 @@ pub fn generate_complete_random_graph<'a>(n: usize) -> Graph {
     }
     graph.adj_matrix = adj_matrix;
 
-    return graph;
+    graph
 }
 
 /// Writes a Graph to a file
@@ -332,7 +321,7 @@ pub fn read_adj_matrix(filename: &str) -> Vec<Vec<u32>> {
         }
     }
 
-    return adj_matrix;
+    adj_matrix
 }
 
 #[cfg(test)]
@@ -358,7 +347,7 @@ mod graph_tests {
         g.add_edge(&p2, &p3).unwrap();
         g.add_edge(&p3, &p0).unwrap();
 
-        return (g, p0, p1, p2, p3);
+        (g, p0, p1, p2, p3)
     }
 
     // Test empty graph
