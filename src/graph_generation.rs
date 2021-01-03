@@ -232,7 +232,7 @@ pub fn generate_complete_random_graph<'a>(n: usize) -> Graph {
     let mut i = 0;
 
     while i < n {
-        let p = Point { id: i as u32, x: rng.gen_range(0, 1000), y: rng.gen_range(0, 1000) };
+        let p = Point { id: i as u32, x: rng.gen_range(0..1000), y: rng.gen_range(0..1000) };
 
         match graph.add_node(p) {
             Ok(_) => i += 1,

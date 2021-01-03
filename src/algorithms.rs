@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::fmt::{Write, Display, Formatter};
 
-use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng, seq::SliceRandom};
 
 use howlong::*;
 
@@ -289,7 +289,13 @@ fn random_hamiltonian_cycle(adj_matrix: &Vec<Vec<u32>>) -> std::result::Result<S
     return State::new(cycle, adj_matrix);
 }
 
-/// Returns the best path and its cost found via hill climbing
+/// Returns the best Hamiltonian cycle, and its cost, found via hill climbing
+///
+/// In this implementation, the algorithm starts with a random Hamiltonian cycle in the graph and
+/// examines each possible swap of two elements among the elements between the first and last in
+/// the cycle. Among the swaps that decrease the cycle cost, it carries out the swap that decreases
+/// it the most. It then repeats this until no swaps decrease the cost anymore, at which point it
+/// stops.
 ///
 /// # Arguments
 ///
@@ -304,8 +310,68 @@ pub fn hill_climbing(adj_matrix: &Vec<Vec<u32>>) -> String {
     return format!("{}", s).to_string();
 }
 
+/// Returns the best Hamiltonian cycle, and its cost, found via simulated annealing
+///
+/// The algorithm starts with a random Hamiltonian cycle in the graph and a preset temperature and
+/// cooling rate. The cooling rate determines how fast the temperature "cools down". Until the
+/// temperature cools to a certain point, random swaps of the elements in the cycle between the
+/// first and last element are attempted. When a swap decreases the cost, it's carried out. When
+/// it increases the cost, it's accepted with a certain probability related to the magnitude of the
+/// increase and the current temperature (less likely if the increase is a lot, yet more likely if
+/// the temperature is high).
+///
+/// Smaller cooling rates increase run time and accuracy significantly, with eventual diminishing returns.
+///
+/// Larger temperatures increase run time significantly and accuracy by relatively little (although
+/// ones too low begin to degrade accuracy significantly).
+///
+/// # Arguments
+///
+/// * `adj_matrix` - Adjacency matrix of graph
 pub fn simulated_annealing(adj_matrix: &Vec<Vec<u32>>) -> String {
-    unimplemented!();
+    let mut s: State = random_hamiltonian_cycle(adj_matrix).unwrap();
+    let n: usize = adj_matrix.len();
+
+    let cooling_rate: f64 = 0.00001; // this being small is crucial!
+    let mut temperature: f64 = 100.0;
+
+    let mut rng = thread_rng();
+    let mut delta: i32;
+
+    let mut t: u32 = 0;
+    loop {
+        temperature *= 1.0 - cooling_rate; // lower temperature
+        if temperature < 1.0 {
+            return format!("{}", s).to_string();
+        }
+
+        let i = rng.gen_range(1..(n - 1));
+        let mut j;
+        loop {
+            j = rng.gen_range(1..(n - 1));
+
+            if j != i { break; }
+        }
+
+        delta = s.weigh_swap((i, j), adj_matrix).unwrap(); // delta = next - current
+        if delta < 0 { // if the swap is an improvement (a descent in cost, i.e. delta negative),
+            // accept it
+            s.do_swap((i, j), adj_matrix).unwrap();
+        }
+        else { // otherwise,
+            // accept it with probability p = e^(-delta / temperature)
+            let p = std::f64::consts::E.powf(-delta as f64 / temperature as f64);
+            // delta, being positive here, needs to be negated so that the exponential is in [0, 1)
+            // this uses the Boltzmann distribution to gradually settle on the final (and hopefully
+            // global) minimum
+
+            if rng.gen_bool(p) == true {
+                s.do_swap((i, j), adj_matrix).unwrap();
+            }
+        }
+
+        t += 1;
+    }
 }
 
 pub fn genetic(adj_matrix: &Vec<Vec<u32>>) -> String {
@@ -341,7 +407,7 @@ pub fn time_algo(
 
     write!(
         output,
-        "{}\nwall time (seconds): {}\ncpu time (seconds):{}",
+        "{}\nwall time (seconds): {}\ncpu time (seconds): {}",
         algo_results, total_wall_time, total_cpu_time
     ).unwrap();
 

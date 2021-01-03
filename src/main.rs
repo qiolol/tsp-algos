@@ -17,15 +17,24 @@ fn main() {
     // shortest tour from 0: 0 -> 1 -> 2 -> 3 -> 0 (total cost: 97)
     // let graph: Vec<Vec<u32>> = read_adj_matrix("./graphs/square_x.txt");
 
-    // write_graph(&generate_complete_random_graph(20), "./graphs/20.txt");
-    let graph: Vec<Vec<u32>> = read_adj_matrix("./graphs/20.txt");
+    // write_graph(&generate_complete_random_graph(100), "./graphs/big.txt"); // generate new graph
+    let graph: Vec<Vec<u32>> = read_adj_matrix("./graphs/big.txt");
 
     println!(
         "\
 ┌─────────────┐\n\
-│Hill climbing│\n\
+│hill climbing│\n\
 └─────────────┘\
         \n{}",
         time_algo(hill_climbing, &graph)
+    );
+
+    println!(
+        "\
+┌───────────────────┐\n\
+│simulated annealing│\n\
+└───────────────────┘\
+        \n{}",
+        time_algo(simulated_annealing, &graph)
     );
 }
