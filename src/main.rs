@@ -28,7 +28,7 @@ fn main() {
 │hill climbing│\n\
 └─────────────┘\
         \n{}",
-        time_algo(hill_climbing, &graph)
+        hill_climbing(&graph)
     );
 
     println!(
@@ -37,6 +37,10 @@ fn main() {
 │simulated annealing│\n\
 └───────────────────┘\
         \n{}",
-        time_algo(simulated_annealing, &graph)
+        simulated_annealing(
+            &graph,
+            0.000015, // cooling_rate (keeping it small is crucial!)
+            100.0    // temperature
+        )
     );
 }

@@ -1,5 +1,6 @@
-use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+#[allow(unused_imports)]
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 
 use rand::{thread_rng, Rng, seq::SliceRandom};
@@ -296,13 +297,28 @@ fn random_hamiltonian_cycle(adj_matrix: &[Vec<u32>]) -> std::result::Result<Stat
 ///
 /// * `adj_matrix` - Adjacency matrix of graph
 pub fn hill_climbing(adj_matrix: &[Vec<u32>]) -> String {
+    // start timers
+    let wall_clock = howlong::clock::HighResolutionClock::now();
+    let cpu_clock = howlong::clock::ProcessCPUClock::now();
+
+    // run algo
     let mut s: State = random_hamiltonian_cycle(adj_matrix).unwrap();
 
     while let Some(best_candidate) = s.find_best_swap(adj_matrix) {
         s.do_swap(best_candidate, adj_matrix).unwrap();
     }
 
-    format!("{}", s)
+    // end timers
+    let total_wall_time = (howlong::HighResolutionClock::now() - wall_clock).as_secs();
+    let elapsed_cpu_time = howlong::ProcessCPUClock::now() - cpu_clock;
+    // colloquially, "cpu time" = user + system time:
+    let total_cpu_time = elapsed_cpu_time.user.as_secs() + elapsed_cpu_time.system.as_secs();
+
+    // output end state
+    format!(
+        "{}\nwall time (seconds): {}\ncpu time (seconds): {}",
+        s, total_wall_time, total_cpu_time
+    )
 }
 
 /// Returns the best Hamiltonian cycle, and its cost, found via simulated annealing
@@ -323,20 +339,36 @@ pub fn hill_climbing(adj_matrix: &[Vec<u32>]) -> String {
 /// # Arguments
 ///
 /// * `adj_matrix` - Adjacency matrix of graph
-pub fn simulated_annealing(adj_matrix: &[Vec<u32>]) -> String {
+pub fn simulated_annealing(
+    adj_matrix: &[Vec<u32>],
+    cooling_rate: f64,
+    mut temperature: f64
+) -> String {
+    // start timers
+    let wall_clock = howlong::clock::HighResolutionClock::now();
+    let cpu_clock = howlong::clock::ProcessCPUClock::now();
+
+    // run algo
     let mut s: State = random_hamiltonian_cycle(adj_matrix).unwrap();
     let n: usize = adj_matrix.len();
-
-    let cooling_rate: f64 = 0.00001; // this being small is crucial!
-    let mut temperature: f64 = 100.0;
 
     let mut rng = thread_rng();
     let mut delta: i32;
 
     loop {
         temperature *= 1.0 - cooling_rate; // lower temperature
+        // stop if cooled down sufficiently
         if temperature < 1.0 {
-            return format!("{}", s)
+            // end timers
+            let total_wall_time = (howlong::HighResolutionClock::now() - wall_clock).as_secs();
+            let elapsed_cpu_time = howlong::ProcessCPUClock::now() - cpu_clock;
+            let total_cpu_time = elapsed_cpu_time.user.as_secs() + elapsed_cpu_time.system.as_secs();
+
+            // output end state
+            return format!(
+                "{}\nwall time (seconds): {}\ncpu time (seconds): {}",
+                s, total_wall_time, total_cpu_time
+            )
         }
 
         let i = rng.gen_range(1..(n - 1));
@@ -366,39 +398,13 @@ pub fn simulated_annealing(adj_matrix: &[Vec<u32>]) -> String {
     }
 }
 
-pub fn genetic(adj_matrix: &[Vec<u32>]) -> String {
-    unimplemented!();
-}
-
-/// Runs and times the given algorithm (in both CPU and wall clock time, in seconds) with the
-/// given adjacency matrix
+/// Returns the best Hamiltonian cycle, and its cost, found via genetic algorithm
 ///
 /// # Arguments
 ///
-/// * `algo` - Algorithm to run
 /// * `adj_matrix` - Adjacency matrix of graph
-pub fn time_algo(
-    algo: fn(&[Vec<u32>]) -> String,
-    adj_matrix: &[Vec<u32>]
-) -> String {
-    // start timers
-    let wall_clock = howlong::clock::HighResolutionClock::now();
-    let cpu_clock = howlong::clock::ProcessCPUClock::now();
-
-    // run algo!
-    let algo_results = algo(&adj_matrix);
-
-    // end timers
-    let total_wall_time = (howlong::HighResolutionClock::now() - wall_clock).as_secs();
-    let elapsed_cpu_time = howlong::ProcessCPUClock::now() - cpu_clock;
-    // colloquially, "cpu time" = user + system time:
-    let total_cpu_time = elapsed_cpu_time.user.as_secs() + elapsed_cpu_time.system.as_secs();
-
-    // output results
-    format!(
-        "{}\nwall time (seconds): {}\ncpu time (seconds): {}",
-        algo_results, total_wall_time, total_cpu_time
-    )
+pub fn genetic(_adj_matrix: &[Vec<u32>]) -> String {
+    unimplemented!();
 }
 
 #[cfg(test)]
