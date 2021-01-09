@@ -134,8 +134,133 @@ faster to boot. The preset values, `temperature = 100.0` and `cooling_rate = 0.0
 increase its run time to around that of hill climbing, and it gets to a minimum cost
 3,000 to 6,000 less. The longer it runs, the more accurate its result. On the same
 graph, after a 5 hour run with `temperature = 100.0` and `cooling_rate = 0.0000001`,
-it got down to a path cost of `8565`! Of course, I have no idea if that's the actual
+it got down to a path cost of 8,565! Of course, I have no idea if that's the actual
 global minimum of the graph, but it's probably close...
 
 ## 🧬 genetic
-// TODO
+[Genetic algorithms](https://en.wikipedia.org/wiki/Genetic_algorithm), my favorite,
+are biological metaphors where many solutions compete with each other to pass on their
+"genes". The higher a solution's *fitness*, the more likely it gets to mate. In a
+very crude approximation of biological evolution, the best solutions thus reproduce
+and combine, and then their children (which may also experience random mutations)
+repeat the process for some number of generations until either some limit of
+fitness or a limit of generation number is hit, and the fittest individual of the
+final generation is chosen as **the** solution.
+
+In this TSP setup, solutions are Hamiltonian cycles, and their fitness is how
+cheap their path cost is. The "DNA strands" are the arrays of nodes, and the nodes
+are the "nucleotides" (the A, C, T, G). Sadly, this isn't the best problem format
+for this kind of genetic algorithm. The reproduction logic is pretty limited due
+to the narrow criteria for solution validity. Remember, a Hamiltonian cycle must
+contain all nodes and have no repeated nodes (except for the first and last node).
+That means that, given two parents `a` and `b` (two Hamiltonian cycles), using half
+of `a`'s path and half of `b`'s path for their child `c`'s path (which could be
+perfectly appropriate for other kinds of problems) would very likely yield an
+invalid Hamiltonian cycle! The ways to get around this aren't very satisfying.
+A common solution seems to be to take half of one parent's path, and then fill
+the remaining half with the missing elements from the other parent's path, in the
+order they appear in it. E.g.,
+
+```
+parent_a: [0, 3, 2, 1, 0]
+           ^  ^
+parent_b: [2, 3, 1, 0, 2]
+           &     &
+child:    [_, _, _, _, _]
+                          fill with half (5 / 2 ~= 2) of parent_a,
+          [0, 3, _, _, 0] capping with first node
+           ^  ^        ^  
+          [0, 3, 2, 1, 0] fill with remaining elements in order from parent_b
+                 &  &
+```
+
+This preserves half of one parent's DNA, and then it peppers in segments of the
+other's, which is kind of apt to a combination of DNA, right? Unfortunately, it's
+very slow (since it's traversing two entire paths per mating), and it doesn't
+even seem to work well (the solutions it returns are very bad).
+
+What I tried is even lamer, but much faster: if the two parents differ in terminal
+(first and last) node, take one parent and switch its terminal node to the other
+parent's. If they don't differ in terminal nodes, take one parent and swap one
+of its elements to more closely resemble the other parent. Surprisingly, the
+solutions this produces seem slightly better, or at worst *as* bad, but take
+much less to arrive at since there's no full path traversals happening. They're
+still really bad solutions though. 😋 Adjusting the runtime to around 7 seconds
+(already longer than hill climbing and simulated annealing), the solutions are
+around 47,000 (3 to 4 times worse!)... ¬w¬
+
+## 🅰️⭐
+[A*](https://en.wikipedia.org/wiki/A*_search_algorithm) is a classic search algorithm
+(there's [an old Red Blob page](https://www.redblobgames.com/pathfinding/a-star/introduction.html)
+with a great walkthrough of it). So far, all the algorithms (genetic, simulated
+annealing, and hill climbing) were "stochastic", going somewhere, figuring out
+how badly they need to go somewhere else and doing that until they run out of
+generations, temperature units, or locally-obvious places to go. A* is a
+systematic algorithm. Instead of starting with some random goal state and iteratively
+mutating it to be better, it starts its journey from one, humble node, and builds up
+a path. It keeps track of where it's been and where it hasn't, and,
+unlike the algorithms above, is *guaranteed* to find the optimal solution (if
+it uses an *admissible* heuristic, anyway).
+
+Heuristics are problem-specific functions that give A* numeric intuition
+about how good its options are. Fundamentally, A* measures an option `n` with:
+
+```
+f(n) = `g(n) + h(n)`
+```
+
+`g(n)` is the cost of the path so far from the start to `n`, and `h(n)` is the
+*estimated optimal* cost from `n` to a goal. `h` is the heuristic function!
+
+A heuristic is *admissible* if it never overestimates the cost to a goal (it's "optimistic").
+This means A* will not be too discouraged to eventually reach a goal, thereby guaranteeing that
+it will. More optimism isn't always better though: with zero discouragement, no options are taken
+off the table, and A* will take all of them. This means it'll waste more time, going through suboptimal
+detours before getting to the optimal ones. Sometimes, when an non-optimal but fast solution is wanted,
+inadmissible heuristics can be used because these take *so* many options off the table that A* wastes
+very little time before arriving at a solution, if not the best solution! The sweet spot
+is a "minimally-optimistic" heuristic -- one that's *just* optimistic enough to be
+admissible and no more.
+
+Three basic heuristics are used in this A* implementation:
+
+- Uniform cost, so-called because `h(n) = 0` for any `n`
+    - ✅ Makes A* optimal! It's very admissible since it grossly *underestimates*
+    the cost to any goal (everything's `0`!).
+    - ❌ Makes A* *very* slow... being *extremely* optimistic, it eliminates few
+    options, causing A* to unselectively run all over them, consuming far more cycles.
+- Random edge, which estimates the cost to the goal by summing up random edges between
+all nodes not yet visited
+    - ❌ Non-optimal! Using random edges is a pretty lazy way to measure the cost
+    to the goal, and it can easily overestimate. This makes it it inadmissible,
+    so it's no surprise it hurts optimality.
+    - ✅ Fastest one! 🏁 Again, no surprise; inadmissible heuristics hem in the
+    options A* explores, so it explores much fewer before finishing.
+- Cheapest edge, which estimates the cost to the goal by summing up the cheapest
+edges between unvisited nodes
+    - ✅ Optimal! This heuristic is admissible since it assumed the path to the goal
+    will be taken via the cheapest edges the whole way, which is optimistic.
+    - ✅ Fast! Not as fast as an inadmissible heuristic, but much faster than a WAY
+    MORE admissible one like uniform cost! It cuts A*'s search time by a lot since
+    it eliminates some search paths, but it doesn't eliminate enough of them to
+    stop arrival at an optimal solution.
+    - 🏆 Of the three, this is the sweet spot heuristic.
+
+Sadly, there's a price to pay for A\*'s systematicness and optimality. All the
+memorization it does about where it's been means it's quick to gobble up memory.
+While stochastic algorithms like hill climbing and simulated annealing can work
+on a 100-node graph no sweat, A* chokes and begins 💥 exploding my RAM on even
+a ***15***-node graph! This depends on the heuristic. Less admissible ones can
+handle larger sizes since they decrease the number of paths A* explores, but
+using inadmissible ones sacrifices optimality, at which point you might as well
+use the stochastic algorithms.
+
+This could very well be due to my implementation, which is *not* guaranteed to
+be written as efficiently as possible by any means. A* implementations can get
+really complex, using memoization and disjoint-set data structures and whatnot.
+It might also be that TSP is especially challenging for A\*. A grid in a
+roguelike game, with a branching factor of 8 (a tile's neighbors), might be more
+manageable than a complete graph, where all `n` nodes connect to every other
+for a branching factor of `n`, particularly when A* contemplates cost estimations
+to its solution, sampling `n` edges each step along the way, and when the solution
+can be based on the proximity to some entity instead of all unvisited nodes!

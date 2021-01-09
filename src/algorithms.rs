@@ -1,11 +1,18 @@
 use std::hash::{Hash, Hasher};
 #[allow(unused_imports)]
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
-use rand::{thread_rng, Rng, seq::SliceRandom};
+use rand::{
+    thread_rng, Rng,
+    seq::SliceRandom,
+    distributions::{WeightedIndex, Distribution},
+    rngs::ThreadRng
+};
 
 use howlong::*;
+use priority_queue::PriorityQueue;
 
 /// A State for the travelling salesman problem (TSP), containing a `path` (partial or complete tour)
 /// of an undirected (and, ideally, complete) graph represented by a square adjacency matrix of `u32`s
@@ -339,6 +346,8 @@ pub fn hill_climbing(adj_matrix: &[Vec<u32>]) -> String {
 /// # Arguments
 ///
 /// * `adj_matrix` - Adjacency matrix of graph
+/// * `cooling_rate` - How fast `temperature` decreases per iteration
+/// * `temperature` - Starting temperature
 pub fn simulated_annealing(
     adj_matrix: &[Vec<u32>],
     cooling_rate: f64,
@@ -398,13 +407,444 @@ pub fn simulated_annealing(
     }
 }
 
+/// Populates the `fitnesses` vector with the "fitness values" in the range [0.0, 1.0] of the States
+/// in the `population` vector
+///
+/// The lower a State's path cost, the higher its "fitness" (the closer to 1.0).
+///
+/// This is done via inverse normalization, or "inverse softmax". For each cost `i`, compute `1 / i`,
+/// then divide each `1 / i` by the sum of the `1 / i`s. (Thanks, Keeks! 💙)
+///
+/// E.g., the following four states have the accompanying fitness values:
+///
+/// ```
+/// state    cost    fitness
+/// a        31      0.052
+/// b        56      0.029
+/// c        2       0.811
+/// d        15      0.108
+/// ```
+///
+/// # Arguments
+///
+/// * `population` - States whose fitness to calculate
+/// * `fitnesses` - Output vector in which to save fitness values
+fn calculate_fitnesses(population: &Vec<State>, fitnesses: &mut Vec<f32>) {
+    *fitnesses = population.iter().map(|x| 1.0 / x.get_cost() as f32).collect();
+    let fitness_sum: f32 = fitnesses.iter().fold(0.0, |acc, x| acc + x);
+    *fitnesses = fitnesses.iter().map(|&x| x / fitness_sum).collect();
+}
+
+/// Returns references to two States from `population` selected for mating
+///
+/// The two States are never the same State, and each is selected based on its corresponding fitness
+/// in `fitnesses`
+///
+/// # Arguments
+///
+/// * `population` - States to select for mating
+/// * `fitnesses` - Fitness values for States in `population` affecting their chance of mate selection
+/// * `rng` - Random number generator, instantiated via `thread_rng()`
+fn select_mating_pair<'a>(
+    population: &'a Vec<State>,
+    fitnesses: &Vec<f32>,
+    rng: &mut ThreadRng
+) -> (&'a State, &'a State) {
+    let dist = WeightedIndex::new(fitnesses).unwrap();
+
+    let parent_a = &population[dist.sample(rng)];
+    let mut parent_b;
+
+    loop {
+        parent_b = &population[dist.sample(rng)];
+
+        if parent_b != parent_a { break; }
+    }
+
+    (parent_a, parent_b)
+}
+
+/// Returns the "child" State of States `parent_a` and `parent_b`
+///
+/// Child path starts as a copy of one parent's path and is then modified by an element swap to
+/// more closely match the other parent's.
+///
+/// E.g., if `parent_b`'s path was chosen as the starting path and the parents differ in terminal
+/// node, the child's path is `parent_b`'s swapped so that it has `parent_a`'s terminal node:
+///
+/// ```
+/// parent_a: [0, 3, 2, 1, 0]
+/// parent_b: [2, 3, 1, 0, 2]
+///            ^        &  ^
+///    child: [0, 3, 1, 2, 0]
+///            &        ^  &
+/// ```
+///
+/// If, however, the parents have the same terminal node, the first differing element in
+/// `parent_b`'s path, call it "first_diff", is swapped with whatever element is in `parent_b`'s
+/// path at the index of "first_diff" in `parent_a`:
+///
+/// ```
+///    index:  0  1  2  3  4  5  6
+/// parent_a: [1, 2, 3, 4, 5, 6, 1]
+/// parent_b: [1, 2, 6, 4, 3, 5, 1]
+///                  ^        &
+///    child: [1, 2, 5, 4, 3, 6, 1]
+///                  &        ^
+/// ```
+///
+/// Since `6` was "first_diff", and since `6` appears at index `5` in `parent_a`, `6` is swapped with
+/// the element at index `5` in `parent_b`, which happens to be `5`. In a slight way, the child
+/// is now a combination of `parent_a` and `parent_b`. Kind of.
+///
+/// # Arguments
+///
+/// * `parent_a` - First parent
+/// * `parent_b` - Second parent
+/// * `rng` - Random number generator, instantiated via `thread_rng()`
+/// * `adj_matrix` - Adjacency matrix of graph
+fn mate(
+    parent_a: &State,
+    parent_b: &State,
+    rng: &mut ThreadRng,
+    adj_matrix: &[Vec<u32>]
+) -> State {
+    let path_a: Vec<u32>;
+    let path_b: Vec<u32>;
+
+    // coin flip to randomly determine starting parent
+    if rng.gen_bool(0.5) {
+        path_a = parent_a.get_path();
+        path_b = parent_b.get_path();
+    }
+    else {
+        path_a = parent_b.get_path();
+        path_b = parent_a.get_path();
+    }
+
+    let n = path_a.len();
+    let mut path_child: Vec<u32> = path_b.to_vec(); // use path_b as the basic template
+
+    // lame (but much faster!) reproduction logic xD
+    // same terminal nodes
+    if path_a[0] == path_b[0] {
+        for i in 1..(n - 1) {
+            if path_a[i] != path_b[i] {
+                path_child.swap(i, path_a.iter().position(|&x| x == path_b[i]).unwrap());
+                break;
+            }
+        }
+    }
+    // different terminal nodes
+    else {
+        path_child.swap(0, path_b.iter().position(|&x| x == path_a[0]).unwrap()); // first terminal node
+        path_child[n - 1] = path_child[0];                                        // last terminal node
+    }
+
+    State::new(path_child, adj_matrix).unwrap()
+}
+
+// A common mating logic is the one below, where half of one parent's "DNA" is retained,
+// and the remaining "nucleotides" (here, element nodes) are filled in.
+// This takes much longer than the mating logic above since it fully traverses both parent paths,
+// and maybe even returns slightly worse results (it's close)! D:
+// fn mate(
+//     parent_a: &State,
+//     parent_b: &State,
+//     rng: &mut ThreadRng,
+//     adj_matrix: &[Vec<u32>]
+// ) -> State {
+//     let path_a: Vec<u32>;
+//     let path_b: Vec<u32>;
+//     // coin flip to randomly determine starting parent
+//     if rng.gen_bool(0.5) {
+//         path_a = parent_a.get_path();
+//         path_b = parent_b.get_path();
+//     }
+//     else {
+//         path_a = parent_b.get_path();
+//         path_b = parent_a.get_path();
+//     }
+//     let n = path_a.len();
+//     let mut path_child: Vec<u32> = Vec::with_capacity(n);
+//
+//     // fill with half of first parent
+//     for i in 0..(n / 2) {
+//         path_child.push(path_a[i]);
+//     }
+//
+//     // fill rest with in-order, non-present elements of the other parent
+//     for n in path_b.iter() {
+//         if !path_child.contains(n) {
+//             path_child.push(*n);
+//         }
+//     }
+//     path_child.push(path_child[0]); // cap with terminal node
+//
+//     State::new(path_child, adj_matrix).unwrap()
+// }
+
+/// Mutates an individual State via a random swap of its non-terminal elements
+///
+/// # Arguments
+///
+/// * `individual` - The State to mutate
+/// * `rng` - Random number generator, instantiated via `thread_rng()`
+/// * `adj_matrix` - Adjacency matrix of graph
+fn mutate(
+    individual: &mut State,
+    rng: &mut ThreadRng,
+    adj_matrix: &[Vec<u32>]
+) {
+    let i: usize = rng.gen_range(1..(individual.get_path().len() - 1));
+    let mut j: usize;
+
+    loop {
+        j = rng.gen_range(1..(individual.get_path().len() - 1));
+
+        if j != i { break; }
+    }
+    individual.do_swap((i, j), adj_matrix).unwrap();
+}
+
+/// Returns a reference to the fittest (cheapest path) State in `population`
+///
+/// # Arguments
+///
+/// * `population` - The States to select from
+fn fittest_individual(population: &Vec<State>) -> &State {
+    let mut cheapest: &State = &population[0];
+
+    for i in 1..population.len() {
+        if population[i].get_cost() < cheapest.get_cost() {
+            cheapest = &population[i];
+        }
+    }
+
+    cheapest
+}
+
 /// Returns the best Hamiltonian cycle, and its cost, found via genetic algorithm
 ///
 /// # Arguments
 ///
 /// * `adj_matrix` - Adjacency matrix of graph
-pub fn genetic(_adj_matrix: &[Vec<u32>]) -> String {
-    unimplemented!();
+/// * `population_size` - Number of individuals in each population (an even number that's at least 2)
+/// * `max_generations` - How many generations to simulate before stopping
+/// * `mutation_rate` - A probability in [0.0, 1.0] of an offspring having a random mutation
+///
+/// # Panics
+///
+/// Panics if:
+///
+/// * `population_size` is not an even number that's at least 2
+/// * `max_generations` is not greater than 0
+/// * `mutation_rate` is not in [0.0, 1.0]
+pub fn genetic(
+    adj_matrix: &[Vec<u32>],
+    population_size: usize,
+    max_generations: u32,
+    mutation_rate: f32
+) -> String {
+    if population_size % 2 != 0 || population_size < 2 {
+        panic!("population_size must be an even number that's at least 2!");
+    }
+    else if max_generations <= 0 {
+        panic!("max_generations must be greater than 0!");
+    }
+    else if mutation_rate < 0.0 || mutation_rate > 1.0 {
+        panic!("mutation_rate must be between 0.0 and 1.0!");
+    }
+
+    // start timers
+    let wall_clock = howlong::clock::HighResolutionClock::now();
+    let cpu_clock = howlong::clock::ProcessCPUClock::now();
+
+    // run algo
+    let mut rng = thread_rng();
+    let mut population: Vec<State> = Vec::with_capacity(population_size); // candidate cycles are individuals
+    let mut fitnesses: Vec<f32> = Vec::with_capacity(population_size); // based on individuals' costs
+
+    // randomly-generate starting population
+    for _ in 0..population_size {
+        population.push(random_hamiltonian_cycle(adj_matrix).unwrap());
+    }
+    // simulate all generations
+    for _ in 0..max_generations {
+        let mut next_generation: Vec<State> = Vec::with_capacity(population_size);
+
+        calculate_fitnesses(&population, &mut fitnesses);
+        for _ in 0..population_size {
+            // select two different individuals to reproduce, based on their fitness
+            let (parent_a, parent_b): (&State, &State) = select_mating_pair(&population, &fitnesses, &mut rng);
+            let mut child: State = mate(parent_a, parent_b, &mut rng, adj_matrix);
+
+            if rng.gen_bool(mutation_rate as f64) { // mutate probabilistically
+                mutate(&mut child, &mut rng, adj_matrix);
+            }
+            next_generation.push(child); // add to new generation
+        }
+        population = next_generation; // replace old population with new generation
+    }
+    // recalculate fitnesses to determine final generation's fittest individual
+    calculate_fitnesses(&population, &mut fitnesses);
+
+    // end timers
+    let total_wall_time = (howlong::HighResolutionClock::now() - wall_clock).as_secs();
+    let elapsed_cpu_time = howlong::ProcessCPUClock::now() - cpu_clock;
+    let total_cpu_time = elapsed_cpu_time.user.as_secs() + elapsed_cpu_time.system.as_secs();
+
+    // output end state
+    return format!(
+        "{}\nwall time (seconds): {}\ncpu time (seconds): {}",
+        fittest_individual(&population), total_wall_time, total_cpu_time
+    )
+}
+
+/// Returns the best Hamiltonian cycle, and its cost, found via A*
+///
+/// # Arguments
+///
+/// * `adj_matrix` - Adjacency matrix of graph
+/// * `heuristic` - Heuristic, `h(s)`, for a State `s` to use in computing `f(s) = g(s) + h(s)`
+fn a_star(
+    adj_matrix: &[Vec<u32>],
+    heuristic: fn(&State, &[Vec<u32>], &HashSet<Rc<State>>) -> i32
+) -> String {
+    // start timers
+    let wall_clock = howlong::clock::HighResolutionClock::now();
+    let cpu_clock = howlong::clock::ProcessCPUClock::now();
+
+    // run algo
+    let initial_state: Rc<State>;
+    let mut frontier = PriorityQueue::new();
+    let mut explored = HashSet::new();
+    let mut in_frontier = HashMap::new(); // since lookup isn't a thing in priority queues
+    let f = |s: &State, adj: &[Vec<u32>], exp: &HashSet<Rc<State>>| { // f(s) = g(s) + h(s)
+        // invert result to get PriorityQueue to act as a min heap
+        -(s.get_cost() as i32 + heuristic(s, adj, exp))
+    };
+    let mut solution: Option<State> = None;
+
+    // initial state is a single, random node path
+    let rand_node = thread_rng().gen_range(0..adj_matrix.len()) as u32;
+
+    initial_state = Rc::new(State::new(vec![rand_node], adj_matrix).unwrap());
+    let f_eval = f(&initial_state, &adj_matrix, &explored);
+
+    frontier.push(Rc::clone(&initial_state), f_eval);
+    in_frontier.insert(initial_state, f_eval);
+
+    while !frontier.is_empty() {
+        let (curr, _) = frontier.pop().unwrap();
+        in_frontier.remove(&curr).unwrap();
+
+        // stop if we've expanded a goal State
+        if curr.is_goal(adj_matrix) {
+            solution = Some(Rc::try_unwrap(curr).unwrap());
+            break;
+        }
+
+        explored.insert(curr.clone());
+        for succ in curr.get_successors(adj_matrix) {
+            let succ_r = Rc::new(succ);
+
+            if !explored.contains(&succ_r) && !in_frontier.contains_key(&succ_r) {
+                let f_eval = f(&succ_r, &adj_matrix, &explored);
+                frontier.push(Rc::clone(&succ_r), f_eval);
+                in_frontier.insert(succ_r, f_eval);
+            }
+            else if in_frontier.contains_key(&succ_r) {
+                let f_eval = f(&succ_r, &adj_matrix, &explored);
+
+                if f_eval > *in_frontier.get(&succ_r).unwrap() {
+                    // reinsert to update f_eval priority in frontier and value in in_frontier
+                    frontier.push(Rc::clone(&succ_r), f_eval).unwrap();
+                    in_frontier.insert(succ_r, f_eval).unwrap();
+                }
+            }
+        }
+    }
+
+    // end timers
+    let total_wall_time = (howlong::HighResolutionClock::now() - wall_clock).as_secs();
+    let elapsed_cpu_time = howlong::ProcessCPUClock::now() - cpu_clock;
+    let total_cpu_time = elapsed_cpu_time.user.as_secs() + elapsed_cpu_time.system.as_secs();
+
+    // output goal state
+    return format!(
+        "{}\nwall time (seconds): {}\ncpu time (seconds): {}",
+        solution.unwrap(), total_wall_time, total_cpu_time
+    )
+}
+
+/// Run uniform cost search (as A* with the zero heuristic) and return the best Hamiltonian cycle
+/// and its cost
+///
+/// This heuristic is trivially admissable (it values everything as 0, so it's in no danger of
+/// overestimating their true cost), so A* will return the optimal solution when using it. However,
+/// it's a *very bad* admissable heuristic because it provides no guidance ("Everything's 0;
+/// go anywhere, A*! 🤷"), so the runtime will be very slow.
+pub fn a_star_uniform_cost(adj_matrix: &[Vec<u32>]) -> String {
+    let zero_heuristic = |
+        _s: &State,
+        _adj_matrix: &[Vec<u32>],
+        _explored: &HashSet<Rc<State>>
+    | -> i32 { 0 };
+
+    return a_star(adj_matrix, zero_heuristic);
+}
+
+/// Run A* with a "grab random edges" heuristic and return the best Hamiltonian cycle and its cost,
+/// found via genetic algorithm
+///
+/// The heuristic picks a random edge from each node that's still unvisited, sums up all those
+/// random edges, and returns that sum.
+///
+/// (It's a poor attempt to guess the remaining distance in the path of State `s` which can easily
+/// be wrong and overestimate, so this heuristic is not admissable. A* is not guaranteed to return
+/// an optimal solution using this heuristic.)
+pub fn a_star_random_edge(adj_matrix: &[Vec<u32>]) -> String {
+    let random_heuristic = |
+        s: &State,
+        adj_matrix: &[Vec<u32>],
+        _explored: &HashSet<Rc<State>>
+    | -> i32 {
+        let mut rng = thread_rng();
+        let mut sum: i32 = 0;
+
+        for unvisited in (0..adj_matrix.len()).filter(|&x| !s.get_path().contains(&(x as u32))) {
+            let rand_edge = rng.gen_range(0..adj_matrix.len());
+
+            sum += adj_matrix[unvisited][rand_edge] as i32;
+        }
+
+        sum
+    };
+
+    return a_star(adj_matrix, random_heuristic);
+}
+
+/// Run A* with a "grab cheapest remaining edges" heuristic and return the best Hamiltonian cycle
+/// and its cost
+///
+/// The heuristic picks the cheapest remaining edge of each node that's still unvisited, sums up
+/// all those cheapest edges, and returns that sum. It is admissable, so A* will return the optimal
+/// solution.
+pub fn a_star_cheapest_edge(adj_matrix: &[Vec<u32>]) -> String {
+    let cheapest_heuristic = |
+        s: &State,
+        adj_matrix: &[Vec<u32>],
+        _explored: &HashSet<Rc<State>>
+    | -> i32 {
+        (0..adj_matrix.len()).filter(|&x| !s.get_path().contains(&(x as u32)))
+                             .fold(0, |sum, i| sum + *adj_matrix[i].iter()
+                                                                  .filter(|&&x| x > 0) // avoid non-edges
+                                                                  .min()
+                                                                  .unwrap() as i32)
+    };
+
+    return a_star(adj_matrix, cheapest_heuristic);
 }
 
 #[cfg(test)]
@@ -483,7 +923,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
         let empty_path_err: std::result::Result<State, &'static str> = Err("States can't have an empty path!");
         let oob_path_err: std::result::Result<State, &'static str> = Err("Invalid node, out of matrix's bounds!");
@@ -542,7 +982,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
 
         // not goals
@@ -629,7 +1069,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
 
         // 3 successors
@@ -674,7 +1114,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
                                            // i: 0  1  2  3  4
         let s_goal_path: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
@@ -707,7 +1147,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
         let s: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
 
@@ -745,7 +1185,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
         let mut s: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
 
@@ -765,7 +1205,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
         let mut s: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
 
@@ -803,7 +1243,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
         let s: State = State::new(vec![0, 1, 3, 2, 0], &adj_matrix).unwrap();
 
@@ -821,7 +1261,7 @@ mod state_tests {
             vec![0, 20, 42, 35], // 0
             vec![20, 0, 30, 34], // 1
             vec![42, 30, 0, 12], // 2
-            vec![35, 34, 12, 0] //  3
+            vec![35, 34, 12, 0]  // 3
         ];
         let s: State = State::new(vec![0, 1, 2, 3, 0], &adj_matrix).unwrap();
 
@@ -878,5 +1318,38 @@ mod random_hamiltonian_cycle_tests {
 
         assert!(s.is_goal(&adj_matrix));
         assert_eq!(s.get_path().len(), adj_matrix.len() + 1);
+    }
+}
+
+#[cfg(test)]
+mod genetic_tests {
+    use super::*;
+
+    #[test]
+    fn calculate_fitnesses_normal() {
+        let adj_matrix: Vec<Vec<u32>> = vec![
+            //   0  1   2   3
+            vec![0, 20, 42, 35], // 0
+            vec![20, 0, 30, 34], // 1
+            vec![42, 30, 0, 12], // 2
+            vec![35, 34, 12, 0]  // 3
+        ];
+        let pop: Vec<State> = vec![
+            State::new(vec![0, 3, 2, 1, 0], &adj_matrix).unwrap(),
+            State::new(vec![2, 1, 3, 0, 2], &adj_matrix).unwrap(),
+            State::new(vec![2, 0, 1, 3, 2], &adj_matrix).unwrap(),
+            State::new(vec![2, 1, 0, 3, 2], &adj_matrix).unwrap()
+        ];
+        let mut fit: Vec<f32> = vec![9.99, 9.99, 9.99, 9.99];
+        let correct_fit: Vec<f32> = vec![
+            0.27885514,
+            0.19183652,
+            0.25045323,
+            0.27885514
+        ];
+
+        calculate_fitnesses(&pop, &mut fit);
+
+        assert_eq!(fit, correct_fit);
     }
 }
