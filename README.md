@@ -1,5 +1,5 @@
 # tsp-algos
-Traveling salesperson problem (TSP) algorithms
+Travelling salesperson problem (TSP) algorithms
 
 Specifically, [Euclidean](https://en.wikipedia.org/wiki/Travelling_salesman_problem#Euclidean) TSP algorithms seeking minimum-cost [Hamiltonian](https://en.wikipedia.org/wiki/Hamiltonian_path) cycles over graphs that are:
 
