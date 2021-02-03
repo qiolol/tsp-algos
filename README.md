@@ -194,9 +194,9 @@ around 47,000 (3 to 4 times worse!)... ¬w¬
 (there's [an old Red Blob page](https://www.redblobgames.com/pathfinding/a-star/introduction.html)
 with a great walkthrough of it). So far, all the algorithms (genetic, simulated
 annealing, and hill climbing) were "stochastic", going somewhere, figuring out
-how badly they need to go somewhere else and doing that until they run out of
-generations, temperature units, or locally-obvious places to go. A* is a
-systematic algorithm. Instead of starting with some random goal state and iteratively
+how badly they need to go somewhere else, and doing that until they run out of
+generations/temperature units/locally-obvious places to go. A* is a systematic
+algorithm. Instead of starting with some random goal state and iteratively
 mutating it to be better, it starts its journey from one, humble node, and builds up
 a path. It keeps track of where it's been and where it hasn't, and,
 unlike the algorithms above, is *guaranteed* to find the optimal solution (if
@@ -238,12 +238,12 @@ all nodes not yet visited
     options A* explores, so it explores much fewer before finishing.
 - Cheapest edge, which estimates the cost to the goal by summing up the cheapest
 edges between unvisited nodes
-    - ✅ Optimal! This heuristic is admissible since it assumed the path to the goal
-    will be taken via the cheapest edges the whole way, which is optimistic.
+    - ✅ Optimal! This heuristic is admissible since it assumes the path to the goal
+    will always be taken via the cheapest remaining edges, which is optimistic.
     - ✅ Fast! Not as fast as an inadmissible heuristic, but much faster than a WAY
     MORE admissible one like uniform cost! It cuts A*'s search time by a lot since
-    it eliminates some search paths, but it doesn't eliminate enough of them to
-    stop arrival at an optimal solution.
+    it eliminates some search paths but doesn't eliminate enough of them to stop
+    arrival at an optimal solution.
     - 🏆 Of the three, this is the sweet spot heuristic.
 
 Sadly, there's a price to pay for A\*'s systematicness and optimality. All the
